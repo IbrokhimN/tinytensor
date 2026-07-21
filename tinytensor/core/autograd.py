@@ -1,4 +1,3 @@
-# tinytensor/core/autograd.py
 import numpy as np
 
 

@@ -2,6 +2,16 @@ import numpy as np
 
 from tinytensor.core.autograd import backward as run_backward
 
+def _unbroadcast(grad, target):
+    while grad.ndim > len(target):
+        grad = grad.sum(axis=0)
+
+    for i, dim in enumerate(target):
+        if dim == 1: 
+            grad = grad.sum(axis=i, keepdims=True)
+    return grad
+
+
 # этот мир жесток
 class Tensor:
     def __init__(self, data, requires_grad=False):
@@ -48,12 +58,7 @@ class Tensor:
                         self.grad = np.zeros_like(self.data, dtype=np.float32)
 
                     grad_self = out.grad * 1.0
-                    while grad_self.ndim > self.data.ndim:
-                        grad_self = grad_self.sum(axis=0)
-                    for i, dim in enumerate(self.data.shape):
-                        if dim == 1:
-                            grad_self = grad_self.sum(axis=i, keepdims=True)
-                    self.grad += grad_self
+                    self.grad += _unbroadcast(grad_self, self.data.shape)
 
                 #градиент для 2 параметра
                 if other.requires_grad:
@@ -61,15 +66,12 @@ class Tensor:
                         other.grad = np.zeros_like(other.data, dtype=np.float32)
 
                     grad_other = out.grad * 1.0
-                    while grad_other.ndim > other.data.ndim:
-                        grad_other = grad_other.sum(axis=0)
-                    for i, dim in enumerate(other.data.shape):
-                        if dim == 1:
-                            grad_other = grad_other.sum(axis=i, keepdims=True)
-                    other.grad += grad_other
+                    other.grad += _unbroadcast(grad_other, other.data.shape)
+
             out._backward = _backward
 
         return out 
+
     def __radd__(self, other):
             # эт если пользователь решит написать не Tensor + 5 а 5 + Tensor
             return self + other
@@ -91,16 +93,20 @@ class Tensor:
                 if self.requires_grad:
                     if self.grad is None:
                         self.grad = np.zeros_like(self.data, dtype=np.float32)
-                    self.grad += out.grad * other.data
+                    grad_self = out.grad * other.data
+                    self.grad += _unbroadcast(grad_self, self.data.shape)
 
                 if other.requires_grad:
                     if other.grad is None:
                         other.grad = np.zeros_like(other.data, dtype=np.float32)
-                    other.grad += out.grad * self.data
+                    grad_other = out.grad * self.data
+                    other.grad += _unbroadcast(grad_other, other.data.shape)
 
             out._backward = _backward
-    
-    def __rmul__(self,other):
+
+        return out
+
+    def __rmul__(self, other):
         return self * other
         #сново переводим это на обычный mul
             
@@ -135,15 +141,134 @@ class Tensor:
         return out
     # обратно переводить его нельзя из за правила линейной алгребы того что A*B != B*A, и тупо размерности не подойдут
 
-    def backward(self):
-          run_backward(self)
-# tens = Tensor([1,2,3,4,5])
-# tens2 = Tensor([6,7,8,9], requires_grad=True)
-# print(tens)
-# print(tens2)
-# print(tens2.shape)
-# tensor([1 2 3 4 5], requires_grad=False)
-# tensor([6 7 8 9], requires_grad=True)
-# (4, )
+    #вычитание
+    def __sub__(self, other):
+        return self + (other * -1)
+    
+    def __rsub__(self, other):
+        return (self * -1 ) + other
+    
+    def __pow__(self, power):
+        out = Tensor(self.data ** power, requires_grad=self.requires_grad)
+        if out.requires_grad:
+            out._prev = {self}
+            def _backward():
+                if self.requires_grad:
+                    if self.grad is None:
+                        self.grad = np.zeros_like(self.data, dtype=np.float32)
+                    self.grad += out.grad * (power * (self.data ** (power - 1)))
+            out._backward = _backward
+        return out
+    
+    def sum(self):
+        out = Tensor(self.data.sum(), requires_grad=self.requires_grad)
+        if out.requires_grad:
+            out._prev = {self}
+            def _backward():
+                if self.requires_grad:
+                    if self.grad is None:
+                        self.grad = np.zeros_like(self.data, dtype=np.float32)
+                    #градиент будет распределен одинаково
+                    self.grad += out.grad * np.ones_like(self.data)
+            out._backward = _backward
+        return out
 
-# все работает
+    # когда это все прекратится?
+    # что я делаю не так?
+    # добавим функцию релу чтоб из активаторов можно было обращаться 
+    def relu(self):
+        out = Tensor(
+            np.maximum(0, self.data),
+            requires_grad=self.requires_grad
+        )
+
+        if out.requires_grad:
+            out._prev = {self}
+
+            def _backward():
+                if self.requires_grad:
+                    if self.grad is None:
+                        self.grad = np.zeros_like(self.data, dtype=np.float32)
+                    self.grad += out.grad * (self.data > 0)
+
+            out._backward = _backward
+
+        return out
+
+    def leaky_relu(self, alpha=0.01):
+        out_data = np.where(self.data > 0, self.data, self.data * alpha)
+        out = Tensor(out_data, requires_grad=self.requires_grad)
+        if out.requires_grad:
+            out._prev = {self}
+            def _backward():
+                if self.requires_grad:
+                    if self.grad is None:
+                        self.grad = np.zeros_like(self.data, dtype=np.float32)
+                    #производная=1 для x>0 и alpha для x<=0
+                    dx = np.where(self.data > 0, 1.0, alpha)
+                    self.grad += out.grad * dx
+            out._backward = _backward
+        return out
+
+    def sigmoid(self):
+        sig = 1.0 / (1.0 + np.exp(-np.clip(self.data, -50, 50)))
+        out = Tensor(sig, requires_grad=self.requires_grad)
+        if out.requires_grad:
+            out._prev = {self}
+            def _backward():
+                if self.requires_grad:
+                    if self.grad is None:
+                        self.grad = np.zeros_like(self.data, dtype=np.float32)
+                    self.grad += out.grad * (sig * (1.0 - sig))
+            out._backward = _backward
+        return out
+
+    def tanh(self):
+        t = np.tanh(self.data)
+        out = Tensor(t, requires_grad=self.requires_grad)
+        if out.requires_grad:
+            out._prev = {self}
+            def _backward():
+                if self.requires_grad:
+                    if self.grad is None:
+                        self.grad = np.zeros_like(self.data, dtype=np.float32)
+                    #производная tanh 1-tanh^2
+                    self.grad += out.grad * (1.0 - t ** 2)
+            out._backward = _backward
+        return out
+
+    def gelu(self):
+        #формула гелу 0.5*x*(1+tanh(sqrt(2/pi)*(x+0.044715*x^3)))
+        x = self.data
+        cdf = 0.5 * (1.0 + np.tanh(np.sqrt(2.0 / np.pi) * (x + 0.044715 * (x ** 3))))
+        out = Tensor(x * cdf, requires_grad=self.requires_grad)
+        if out.requires_grad:
+            out._prev = {self}
+            def _backward():
+                if self.requires_grad:
+                    if self.grad is None:
+                        self.grad = np.zeros_like(self.data, dtype=np.float32)
+                    pdf = np.exp(-0.5 * (x ** 2)) / np.sqrt(2.0 * np.pi)
+                    d_gelu = cdf + x * pdf
+                    self.grad += out.grad * d_gelu
+            out._backward = _backward
+        return out
+
+    def backward(self):
+        run_backward(self)
+        
+
+# ⣇⣿⠘⣿⣿⣿⡿⡿⣟⣟⢟⢟⢝⠵⡝⣿⡿⢂⣼⣿⣷⣌⠩⡫⡻⣝⠹⢿⣿⣷
+# ⡆⣿⣆⠱⣝⡵⣝⢅⠙⣿⢕⢕⢕⢕⢝⣥⢒⠅⣿⣿⣿⡿⣳⣌⠪⡪⣡⢑⢝⣇
+# ⡆⣿⣿⣦⠹⣳⣳⣕⢅⠈⢗⢕⢕⢕⢕⢕⢈⢆⠟⠋⠉⠁⠉⠉⠁⠈⠼⢐⢕⢽
+# ⡗⢰⣶⣶⣦⣝⢝⢕⢕⠅⡆⢕⢕⢕⢕⢕⣴⠏⣠⡶⠛⡉⡉⡛⢶⣦⡀⠐⣕⢕
+# ⡝⡄⢻⢟⣿⣿⣷⣕⣕⣅⣿⣔⣕⣵⣵⣿⣿⢠⣿⢠⣮⡈⣌⠨⠅⠹⣷⡀⢱⢕
+# ⡝⡵⠟⠈⢀⣀⣀⡀⠉⢿⣿⣿⣿⣿⣿⣿⣿⣼⣿⢈⡋⠴⢿⡟⣡⡇⣿⡇⡀⢕
+# ⡝⠁⣠⣾⠟⡉⡉⡉⠻⣦⣻⣿⣿⣿⣿⣿⣿⣿⣿⣧⠸⣿⣦⣥⣿⡇⡿⣰⢗⢄
+# ⠁⢰⣿⡏⣴⣌⠈⣌⠡⠈⢻⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣬⣉⣉⣁⣄⢖⢕⢕⢕
+# ⡀⢻⣿⡇⢙⠁⠴⢿⡟⣡⡆⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣷⣵⣵⣿
+# ⡻⣄⣻⣿⣌⠘⢿⣷⣥⣿⠇⣿⣿⣿⣿⣿⣿⠛⠻⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿
+# ⣷⢄⠻⣿⣟⠿⠦⠍⠉⣡⣾⣿⣿⣿⣿⣿⣿⢸⣿⣦⠙⣿⣿⣿⣿⣿⣿⣿⣿⠟
+# ⡕⡑⣑⣈⣻⢗⢟⢞⢝⣻⣿⣿⣿⣿⣿⣿⣿⠸⣿⠿⠃⣿⣿⣿⣿⣿⣿⡿⠁⣠
+# ⡝⡵⡈⢟⢕⢕⢕⢕⣵⣿⣿⣿⣿⣿⣿⣿⣿⣿⣶⣶⣿⣿⣿⣿⣿⠿⠋⣀⣈⠙
+# ⡝⡵⡕⡀⠑⠳⠿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⠿⠛⢉⡠⡲⡫⡪⡪⡣ 
