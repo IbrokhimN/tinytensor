@@ -1,0 +1,4 @@
+numpy>=1.23
+
+[dev]
+pytest>=7.0
