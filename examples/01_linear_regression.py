@@ -13,7 +13,7 @@ from tinytensor.core.tensor import Tensor
 from tinytensor.nn.linear import Linear
 from tinytensor.nn.losses import MSELoss
 from tinytensor.optim import SGD
-
+from tinytensor.utils import progress_bar
 set_seed(42)
 
 n_samples = 200
@@ -28,7 +28,7 @@ loss_fn = MSELoss()
 optimizer = SGD(model.parameters(), lr=0.01)
 
 epochs = 200
-for epoch in range(epochs):
+for epoch in progress_bar(range(100)):
     optimizer.zero_grad()
 
     pred = model(x)
@@ -39,6 +39,8 @@ for epoch in range(epochs):
 
     if epoch % 20 == 0:
         print(f"epoch {epoch:3d} | loss {float(loss.data):.4f}")
+
+model.save("test_model.tt") # tt это типа tinytensor
 
 print("\nвыученные параметры:")
 print("weight:", model.weight.data.flatten())
