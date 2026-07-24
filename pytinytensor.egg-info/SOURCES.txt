@@ -38,3 +38,4 @@ tinytensor/optim/optimizer.py
 tinytensor/utils/__init__.py
 tinytensor/utils/bar.py
 tinytensor/utils/early_stopping.py
+tinytensor/utils/summary.py
