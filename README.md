@@ -1,11 +1,11 @@
 # tinytensor
 
 Маленький самописный autograd на numpy. Тензоры, backprop, пара слоев,
-лоссы, оптимизаторы и даталоадер. По сути свой мини-pytorch, только без
-плюшек и без cuda (пока).
+лоссы, оптимизаторы, даталоадер, плюс теперь есть опциональный cuda-бэкенд
+для matmul через cublas. По сути свой мини-pytorch, только совсем без плюшек.
 
-Никакой производительности тут не ищите, тут просто видно как все
-устроено внутри, без магии.
+Никакой производительности тут не ищите (ну кроме куды, если она у вас
+собралась), тут просто видно как все устроено внутри
 
 ## Содержание
 
@@ -13,6 +13,9 @@
 - [Быстрый старт](#быстрый-старт)
 - [Как работает autograd](#как-работает-autograd)
 - [API](#api)
+- [Cuda-бэкенд](#cuda-бэкенд)
+- [Utils](#utils)
+- [Сохранение модели](#сохранение-модели)
 - [Примеры](#примеры)
 - [Тесты](#тесты)
 - [Структура](#структура)
@@ -34,7 +37,9 @@ pip install -e .[dev]     # плюс pytest, если хотите гонять 
 pip install -r requirements.txt
 ```
 
-Зависимость одна - numpy.
+Зависимости: numpy и pybind11. Куда собирается сама, если найдется nvcc
+(см. ниже), если нет - просто соберется чистый cpu-вариант, ничего
+руками включать не надо.
 
 ## Быстрый старт
 
@@ -70,7 +75,8 @@ print(model.weight.data, model.bias.data)  # ~2.0, ~1.0
 - `data` - сами значения (numpy-массив, всегда float32);
 - `grad` - градиент, пока не посчитан - None;
 - `_prev` - от каких тензоров он произошел (родители в графе);
-- `_backward` - функция которая знает как раскидать градиент на родителей.
+- `_backward` - функция которая знает как раскидать градиент на родителей;
+- `device` - просто метка `"cpu"` или `"cuda"`, влияет только на то, какой matmul дернется.
 
 Когда считаете `z = f(x, y)`, по цепному правилу:
 
@@ -98,7 +104,7 @@ dL/dy = dL/dz * dz/dy
 |---|---|---|
 | `a + b` | `a + b` | `dL/da += dL/dz`, `dL/db += dL/dz` (плюс схлопывание по broadcast-осям) |
 | `a * b` | `a * b` | `dL/da += dL/dz * b`, `dL/db += dL/dz * a` |
-| `a @ b` | matmul | `dL/da += dL/dz @ bᵀ`, `dL/db += aᵀ @ dL/dz` |
+| `a @ b` | matmul (cpu или cublas) | `dL/da += dL/dz @ bᵀ`, `dL/db += aᵀ @ dL/dz` |
 | `a ** p` | `aᵖ` | `dL/da += dL/dz * p * a^(p-1)` |
 | ReLU | `max(0, x)` | 1 при x>0, иначе 0 |
 | LeakyReLU | x или αx | 1 при x>0, иначе α |
@@ -114,11 +120,12 @@ dL/dy = dL/dz * dz/dy
 ### Tensor
 
 `tinytensor.core.tensor.Tensor` - главный класс. Есть `+ - * @ **`, `.sum()`,
-активации `relu / leaky_relu / sigmoid / tanh / gelu`, ну и `.backward()`.
+активации `relu / leaky_relu / sigmoid / tanh / gelu`, `.backward()`, и
+`.to(device)` чтоб пометить тензор как `"cpu"` или `"cuda"`.
 
 ### nn
 
-- `Module` - от него наследуются все слои, `forward / parameters() / zero_grad()`, по духу как [`torch.nn.Module`](https://pytorch.org/docs/stable/generated/torch.nn.Module.html);
+- `Module` - от него наследуются все слои, `forward / parameters() / zero_grad() / state_dict() / load_state_dict() / save() / load()`, по духу как [`torch.nn.Module`](https://pytorch.org/docs/stable/generated/torch.nn.Module.html);
 - `Linear(in_features, out_features)` - обычный `y = xW + b`, веса инициализируются по [He/Kaiming init](https://arxiv.org/abs/1502.01852) (`std = sqrt(2/in_features)`);
 - `ReLU, LeReLU, Sigmod, Tanh, GELU` - тонкие обертки над методами Tensor;
 - `MSELoss` - `mean((pred - target)^2)`, банальщина.
@@ -133,17 +140,72 @@ dL/dy = dL/dz * dz/dy
 - `Dataset / TensorDataset` - обертка над (x, y);
 - `DataLoader` - бьет на батчи, можно с shuffle, мини-версия [`torch.utils.data.DataLoader`](https://pytorch.org/docs/stable/data.html).
 
+## Cuda-бэкенд
+
+При установке `setup.py` сам проверяет есть ли `nvcc`, и если да - собирает
+`tinytensor.cuda_ops`, маленький pybind11-модуль, который дергает
+`cublasSgemm` (`tinytensor/backends/cuda_gpu.cu` + `cuda_binding.cpp`).
+Если куды нет, сборка просто идет по cpu-пути, ничего не ломается.
+
+Сейчас куда греет только `matmul` - если у любого из двух тензоров
+`device == "cuda"` и модуль собрался, `Tensor.__matmul__` уходит в
+`cuda_ops.matmul` вместо `numpy`. Все остальные операции (сложение,
+активации и тд) все равно считаются на cpu через numpy, реального
+управления памятью на gpu тут нет - данные каждый раз гоняются
+host <-> device внутри одного вызова.
+
+Что почитать если охота лучше понять что там происходит:
+
+- [cuBLAS docs (cublasSgemm)](https://docs.nvidia.com/cuda/cublas/index.html#cublas-lt-t-gt-gemm)
+- [pybind11 docs](https://pybind11.readthedocs.io/en/stable/) - как из C++/CUDA дергать функции из питона
+
+## Utils
+
+`tinytensor.utils`:
+
+- `progress_bar` / `train_bar` (алиас) - генератор-обертка, рисует прогрессбар в консоли:
+  ```python
+  from tinytensor.utils import train_bar
+  for epoch in train_bar(range(100), prefix="обучение"):
+      ...
+  ```
+- `EarlyStopping(model, patience=5, min_delta=0.0, restore_best_weights=True)` - следит за val_loss, останавливает обучение и откатывает модель на лучший чекпоинт если она перестала улучшаться:
+  ```python
+  from tinytensor.utils import EarlyStopping
+  early_stopping = EarlyStopping(model, patience=7)
+  for epoch in range(100):
+      val_loss = evaluate(model)
+      if early_stopping(val_loss):
+          break
+  ```
+
+## Сохранение модели
+
+У `Module` есть `save(filepath)` / `load(filepath)` (обычный pickle поверх
+`state_dict()`), формат файла - `.tt`. По задумке должно работать вот так:
+
+```python
+model.save("model.tt")
+model.load("model.tt")
+```
+
+На практике сейчас тут баг: `state_dict()` не делает `return`, а `load()`
+открывает файл в режиме `"wb"` вместо `"rb"` - то есть load сам затирает
+файл перед тем как его же читать. Так что прямо сейчас save/load реально
+не работают, несмотря на то что в примере `01_linear_regression.py` вызов
+`model.save(...)` есть. README не трогает код, так что просто имейте это
+в виду пока кто-нибудь не поправит эти две строчки.
+
 ## Примеры
 
-- [`examples/01_linear_regression.py`](examples/01_linear_regression.py) - линейная регрессия, Linear + MSELoss + SGD на `y = 3x + 2 + шум`.
+- [`examples/01_linear_regression.py`](examples/01_linear_regression.py) - линейная регрессия, Linear + MSELoss + SGD на синтетике, с прогрессбаром (`progress_bar`) и попыткой сохранить модель в `test_model.tt`.
 - [`examples/02_mnist_mlp.py`](examples/02_mnist_mlp.py) - MLP (Linear -> ReLU -> Linear) с AdamW и DataLoader на синтетике в формате mnist (784 фичи, 10 классов). Настоящего mnist и загрузчиков датасетов тут нет, лень было тащить.
 
 Как выглядит запуск вживую:
 
 ```
 $ python3 01_linear_regression.py
-epoch   0 | loss 30.8016
-epoch 180 | loss 0.2365
+обучение |██████████████████████████████| 100.0% [0.0s]
 выученные параметры: weight ~ 2.995, bias ~ 1.996
 
 $ python3 02_mnist_mlp.py
@@ -158,8 +220,8 @@ pip install -e .[dev]
 python3 -m pytest tests/ -v
 ```
 
-47 штук, гоняют арифметику тензоров и broadcasting, autograd (накопление
-градиента, топология, повторный backward), лоссы, оптимизаторы и
+Гоняют арифметику тензоров и broadcasting, autograd (накопление
+градиента, топология, повторный backward), лоссы, оптимизаторы, слои nn и
 Dataset/DataLoader.
 
 > Важно: запускать через pytest из корня репы (или после `pip install -e .`),
@@ -174,7 +236,8 @@ tinytensor/
 │   ├── nn/          # Module, Linear, активации, MSELoss
 │   ├── optim/        # SGD, AdamW
 │   ├── data/         # Dataset, DataLoader
-│   ├── backends/     # заготовка под cuda, пока пусто
+│   ├── backends/     # cpu_numpy.py (заглушка) + cuda_gpu.cu / cuda_binding.cpp (cublas)
+│   ├── utils/        # progress_bar, train_bar, EarlyStopping
 │   └── config.py     # сид рандома
 ├── examples/
 ├── tests/
@@ -184,8 +247,9 @@ tinytensor/
 
 ## Чего нет
 
-- Только numpy-backend, cuda_gpu.py пустой файл-заглушка.
-- Нет кросс-энтропии, сверток, рекуррентных слоев, сохранения модели (см. ToDo в исходном плане проекта).
+- Нет кросс-энтропии, сверток, рекуррентных слоев
+- Cuda-бэкенд ускоряет только matmul, остальное все равно на cpu, и никакого реального управления gpu-памятью между операциями нет.
+- save/load модели сейчас сломаны (см. раздел [Сохранение модели](#сохранение-модели)).
 - backward не кэширует граф между вызовами, каждый раз строит топологию заново, как и в micrograd - никакой лени в духе pytorch тут нет.
 
 ## Ссылки
@@ -201,3 +265,5 @@ tinytensor/
 - [Hendrycks & Gimpel - GELU](https://arxiv.org/abs/1606.08415)
 - [PyTorch - torch.nn.Module](https://pytorch.org/docs/stable/generated/torch.nn.Module.html)
 - [PyTorch - torch.utils.data.DataLoader](https://pytorch.org/docs/stable/data.html)
+- [cuBLAS docs](https://docs.nvidia.com/cuda/cublas/index.html)
+- [pybind11 docs](https://pybind11.readthedocs.io/en/stable/)
