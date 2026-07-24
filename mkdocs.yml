@@ -1,0 +1,88 @@
+site_name: tinytensor
+site_description: маленький самописный autograd на numpy
+site_author: IbrokhimN
+repo_url: https://github.com/IbrokhimN/tinytensor
+repo_name: IbrokhimN/tinytensor
+
+theme:
+  name: material
+  language: ru
+  icon:
+    repo: fontawesome/brands/github
+  font:
+    text: Inter
+    code: JetBrains Mono
+  palette:
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: black
+      accent: deep orange
+      toggle:
+        icon: material/weather-sunny
+        name: включить светлую тему
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: black
+      accent: deep orange
+      toggle:
+        icon: material/weather-night
+        name: включить темную тему
+  features:
+    - navigation.tabs
+    - navigation.top
+    - navigation.sections
+    - navigation.indexes
+    - navigation.footer
+    - toc.follow
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.code.annotate
+    - content.tabs.link
+
+docs_dir: docs
+
+nav:
+  - Главная: index.md
+  - Старт:
+      - Getting Started: getting_started.md
+      - FAQ: faq.md
+  - Ядро:
+      - Tensor и autograd: tensor_and_autograd.md
+      - nn: nn.md
+      - optim: optim.md
+      - data: data.md
+      - utils: utils.md
+  - Продвинутое:
+      - Сохранение модели: model_saving.md
+      - Cuda-бэкенд: cuda.md
+
+markdown_extensions:
+  - tables
+  - toc:
+      permalink: "#"
+      title: На этой странице
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.snippets
+  - attr_list
+  - md_in_html
+  - footnotes
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/IbrokhimN/tinytensor
+    - icon: fontawesome/brands/python
+      link: https://pypi.org/project/pytinytensor/
+
+extra_css:
+  - assets/extra.css

@@ -1,0 +1,49 @@
+:root {
+  --md-primary-fg-color: #111111;
+  --md-primary-fg-color--dark: #111111;
+}
+
+.md-header {
+  box-shadow: none;
+  border-bottom: 1px solid var(--md-default-fg-color--lightest);
+}
+
+.md-typeset h1 {
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.md-typeset h2 {
+  font-weight: 600;
+  border-bottom: 1px solid var(--md-default-fg-color--lightest);
+  padding-bottom: 0.3em;
+}
+
+.md-typeset code {
+  border-radius: 4px;
+}
+
+.md-typeset pre > code {
+  border-radius: 8px;
+}
+
+.md-typeset table:not([class]) {
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+.md-typeset table:not([class]) th {
+  background-color: var(--md-default-fg-color--lightest);
+}
+
+.md-nav__title {
+  font-weight: 700;
+}
+
+.md-typeset .admonition,
+.md-typeset details {
+  border-radius: 8px;
+  border-width: 0;
+  border-left-width: 4px;
+}

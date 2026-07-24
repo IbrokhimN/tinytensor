@@ -52,7 +52,7 @@ PyPI не принимает голые линуксовые wheel'ы, толь�
 twine upload dist/pytinytensor-X.Y.Z.tar.gz
 ```
 
-Подробнее про паблишинг и cuda-wheel в [cuda.md](cuda.md#публикация-wheel-с-кудой).
+Подробнее про паблишинг и cuda-wheel в [cuda.md](cuda.md).
 
 ## KDE/GNOME вылезает с окном про пароль от кошелька при `twine upload`
 
