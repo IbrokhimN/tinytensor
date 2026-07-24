@@ -34,6 +34,7 @@ class Module:
         sdict = {}
         for name, param in self._get_named_params().items():
             sdict[name] = param.data
+        return sdict
         
     def load_state_dict(self, sdict):
         #запихиваем обратно
@@ -58,6 +59,6 @@ class Module:
 
     # загрузка весов обратно
     def load(self, filepath):
-        with open(filepath, "wb") as f:
+        with open(filepath, "rb") as f:
             sd = pickle.load(f)
             self.load_state_dict(sd)
