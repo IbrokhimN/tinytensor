@@ -7,6 +7,7 @@ class ReLU(Module):
 class LeReLU(Module):
     # у нас есть тут альфа
     def __init__(self, alpha=0.01):
+        super().__init__()
         self.alpha = alpha
     
     def forward(self, x):

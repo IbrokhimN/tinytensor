@@ -1,3 +1,4 @@
+LICENSE
 README.md
 pyproject.toml
 setup.py
@@ -18,6 +19,7 @@ tinytensor/backends/__init__.py
 tinytensor/backends/cpu_numpy.py
 tinytensor/backends/cuda_binding.cpp
 tinytensor/backends/cuda_gpu.cu
+tinytensor/backends/cuda_gpu.py
 tinytensor/core/__init__.py
 tinytensor/core/autograd.py
 tinytensor/core/ops.py
@@ -27,6 +29,7 @@ tinytensor/data/dataloader.py
 tinytensor/data/dataset.py
 tinytensor/nn/__init__.py
 tinytensor/nn/activations.py
+tinytensor/nn/dropout.py
 tinytensor/nn/linear.py
 tinytensor/nn/losses.py
 tinytensor/nn/modules.py

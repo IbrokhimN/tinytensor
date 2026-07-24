@@ -1,11 +1,12 @@
 Metadata-Version: 2.4
 Name: pytinytensor
-Version: 0.1.1
+Version: 0.1.3
 Summary: мини ИИ фреймворк от IbrokimN ( github/IbrokhimN )
 Home-page: https://github.com/IbrokhimN/tinytensor
 Author: IbrokhimN
 Requires-Python: >=3.9
 Description-Content-Type: text/markdown
+License-File: LICENSE
 Requires-Dist: numpy>=1.23
 Requires-Dist: pybind11>=2.10
 Provides-Extra: dev
@@ -14,6 +15,7 @@ Dynamic: author
 Dynamic: description
 Dynamic: description-content-type
 Dynamic: home-page
+Dynamic: license-file
 Dynamic: provides-extra
 Dynamic: requires-dist
 Dynamic: requires-python

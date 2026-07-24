@@ -10,6 +10,7 @@
 ## Содержание
 
 - [Установка](#установка)
+- [Документация](#документация)
 - [Быстрый старт](#быстрый-старт)
 - [Как работает autograd](#как-работает-autograd)
 - [API](#api)
@@ -35,6 +36,20 @@ pip install -r requirements.txt
 ```
 
 Зависимость одна - numpy.
+
+## Документация
+
+Все подробности разложены по [`docs/`](docs/), README тут больше как входная дверь:
+
+- [docs/getting_started.md](docs/getting_started.md) - установка, quickstart
+- [docs/tensor_and_autograd.md](docs/tensor_and_autograd.md) - как устроен Tensor и backward
+- [docs/nn.md](docs/nn.md) - Module, Linear, активации, Dropout, MSELoss
+- [docs/optim.md](docs/optim.md) - SGD, AdamW
+- [docs/data.md](docs/data.md) - Dataset, DataLoader
+- [docs/utils.md](docs/utils.md) - progress_bar, EarlyStopping
+- [docs/model_saving.md](docs/model_saving.md) - save/load модели
+- [docs/cuda.md](docs/cuda.md) - опциональный cuda-бэкенд
+- [docs/faq.md](docs/faq.md) - грабли, на которые уже наступили
 
 ## Быстрый старт
 
