@@ -33,7 +33,9 @@ tinytensor/nn/dropout.py
 tinytensor/nn/linear.py
 tinytensor/nn/losses.py
 tinytensor/nn/modules.py
+tinytensor/nn/utils.py
 tinytensor/optim/__init__.py
+tinytensor/optim/lr_scheduler.py
 tinytensor/optim/optimizer.py
 tinytensor/utils/__init__.py
 tinytensor/utils/bar.py

@@ -35,7 +35,6 @@ def find_cuda_lib_dirs():
             found.append(lib_dir)
     return found
 
-
 def check_cuda():
     try:
         subprocess.check_output(["nvcc", "--version"])
@@ -113,7 +112,7 @@ else:
 
 setup(
     name="pytinytensor",
-    version="0.1.4",
+    version="0.1.5",
     description="мини ИИ фреймворк от IbrokimN ( github/IbrokhimN )",
     long_description=long_description,
     long_description_content_type="text/markdown",

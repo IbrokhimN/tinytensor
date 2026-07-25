@@ -37,7 +37,7 @@ class Module:
         sdict = {}
         for name, param in self._get_named_params().items():
             sdict[name] = param.data
-        return sdict
+        return sdict           
         
     def load_state_dict(self, sdict):
         #запихиваем обратно
@@ -63,3 +63,34 @@ class Module:
         with open(filepath, "rb") as f:
             sd = pickle.load(f)
             self.load_state_dict(sd)
+        
+
+class Sequential(Module):
+    def __init__(self, *args):
+        super().__init__()
+        self.layers = list(args)
+
+    def parameters(self):
+        params = []
+        for layer in self.layers:
+            params.extend(layer.parameters())
+        return params
+
+    def _get_named_params(self, prefix=""):
+        named = {}
+        for i, layer in enumerate(self.layers):
+            key = f"{prefix}.layers.{i}" if prefix else f"layers.{i}"
+            named.update(layer._get_named_params(prefix=key))
+        return named
+
+    def forward(self, x):
+        # закидываем x по слоям
+        for layer in self.layers:
+            x = layer(x)
+        return x
+
+    def __getitem__(self, idx):
+        return self.layers[idx]
+
+    def __len__(self):
+        return len(self.layers)
