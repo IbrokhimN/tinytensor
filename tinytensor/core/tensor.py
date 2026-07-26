@@ -184,6 +184,20 @@ class Tensor:
             out._backward = _backward
         return out
 
+    def reshape(self, *shape):
+        out = Tensor(self.data.reshape(*shape), requires_grad=self.requires_grad, device=self.device)
+        if out.requires_grad:
+            out._prev = {self}
+
+            def _backward():
+                if self.requires_grad:
+                    if self.grad is None:
+                        self.grad = np.zeros_like(self.data, dtype=np.float32)
+                    self.grad += out.grad.reshape(self.data.shape)
+
+            out._backward = _backward
+        return out
+
     def relu(self):
         out = Tensor(
             np.maximum(0, self.data),
