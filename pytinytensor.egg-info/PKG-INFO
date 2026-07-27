@@ -1,6 +1,6 @@
 Metadata-Version: 2.4
 Name: pytinytensor
-Version: 0.1.6
+Version: 0.1.7
 Summary: мини ИИ фреймворк от IbrokimN ( github/IbrokhimN )
 Home-page: https://github.com/IbrokhimN/tinytensor
 Author: IbrokhimN
@@ -22,6 +22,8 @@ Dynamic: requires-python
 Dynamic: summary
 
 # tinytensor
+
+Новые доки напишу в след версии 
 
 Маленький самописный autograd на numpy. Тензоры, backprop, пара слоев,
 лоссы, оптимизаторы и даталоадер. По сути свой мини-pytorch, только без

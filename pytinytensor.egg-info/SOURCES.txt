@@ -32,12 +32,14 @@ tinytensor/nn/activations.py
 tinytensor/nn/batchnorm.py
 tinytensor/nn/conv.py
 tinytensor/nn/dropout.py
+tinytensor/nn/embedding.py
 tinytensor/nn/flatten.py
 tinytensor/nn/functional.py
 tinytensor/nn/linear.py
 tinytensor/nn/losses.py
 tinytensor/nn/modules.py
 tinytensor/nn/pooling.py
+tinytensor/nn/rnn.py
 tinytensor/nn/utils.py
 tinytensor/optim/__init__.py
 tinytensor/optim/lr_scheduler.py
