@@ -32,10 +32,18 @@ class DataLoader:
 
         #cбор
         batch_x, batch_y = [], []
+        device = 'cpu'
         for i in batch_indices:
             x, y = self.dataset[i]
-            batch_x.append(x.data if isinstance(x, Tensor) else x)
-            batch_y.append(y.data if isinstance(y, Tensor) else y)
+            if isinstance(x, Tensor):
+                device = x.device
+                batch_x.append(x.data)
+            else:
+                batch_x.append(x)
+            if isinstance(y, Tensor):
+                batch_y.append(y.data)
+            else:
+                batch_y.append(y)
 
         # батч в нампай и потом в тензо
-        return Tensor(np.array(batch_x)), Tensor(np.array(batch_y))
+        return Tensor(np.array(batch_x), device=device), Tensor(np.array(batch_y), device=device)

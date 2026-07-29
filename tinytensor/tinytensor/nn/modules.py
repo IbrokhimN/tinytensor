@@ -1,47 +1,66 @@
 from tinytensor.core.tensor import Tensor
 import pickle
-
 #кароч модуль от которого будут наследоваться все слои
 class Module:
     def __init__(self):
+        self._modules = {}
         self.training = True
-    
+
+    def to(self, device):
+        # переносим все параметры модели либо на cpu либо на cuda
+        for name, param in self.__dict__.items():
+            if isinstance(param, Tensor):
+                setattr(self, name, param.to(device))
+            elif isinstance(param, Module):
+                param.to(device)
+        return self
+
+
+    def cuda(self):
+        return self.to('cuda')
+
+    def cpu(self):
+        return self.to('cpu')
+
     def __call__(self, *args, **kwargs):
         return self.forward(*args, **kwargs)
-
     #щас это просто заглушка для прямого вызова, а в реале у всех должны быть свои реализации forward, так что это роль не играет
     def forward(self, *args, **kwargs):
         raise NotImplementedError(...)
-
     # сохраняет обучаемые веса, и если в модуле есть еще какие то модули то он их тоже открывает 
     def parameters(self):
         params = []
         for atr in self.__dict__.values():
             if isinstance(atr, Tensor) and atr.requires_grad == True:
                 params.append(atr)
-
             elif isinstance(atr, Module):
                 params.extend(atr.parameters())
         return params
-
     #обнуляет градиенты
     def zero_grad(self):
         for atr in self.parameters():
             atr.grad = None
         
+    def train(self, mode=True):
+        self.training = mode
+        for atr in self.__dict__.values():
+            if isinstance(atr, Module):
+                atr.train(mode)
+        return self
+    def eval(self):
+        return self.train(False)
     def state_dict(self):
         #вытащим все веса параметров
         sdict = {}
         for name, param in self._get_named_params().items():
             sdict[name] = param.data
-        return sdict
+        return sdict           
         
     def load_state_dict(self, sdict):
         #запихиваем обратно
         for name, param in self._get_named_params().items():
             if name in sdict:
                 param.data = sdict[name] 
-
     def _get_named_params(self, prefix=""):
         named = {}
         for attr_name, attr in self.__dict__.items():
@@ -56,9 +75,45 @@ class Module:
     def save(self,filepath):
         with open(filepath, "wb") as f:
             pickle.dump(self.state_dict(), f)
-
     # загрузка весов обратно
     def load(self, filepath):
         with open(filepath, "rb") as f:
             sd = pickle.load(f)
             self.load_state_dict(sd)
+        
+
+class Sequential(Module):
+    def __init__(self, *args):
+        super().__init__()
+        self.layers = list(args)
+
+    def parameters(self):
+        params = []
+        for layer in self.layers:
+            params.extend(layer.parameters())
+        return params
+
+    def to(self, device):
+        for layer in self.layers:
+            layer.to(device)
+        return self
+
+    def _get_named_params(self, prefix=""):
+        named = {}
+        for i, layer in enumerate(self.layers):
+            key = f"{prefix}.layers.{i}" if prefix else f"layers.{i}"
+            named.update(layer._get_named_params(prefix=key))
+        return named
+
+    def forward(self, x):
+        # закидываем x по слоям
+        for layer in self.layers:
+            x = layer(x)
+        return x
+
+    def __getitem__(self, idx):
+        return self.layers[idx]
+
+    def __len__(self):
+        return len(self.layers)
+

@@ -1,0 +1,5 @@
+numpy>=1.23
+pybind11>=2.10
+
+[dev]
+pytest>=7.0
