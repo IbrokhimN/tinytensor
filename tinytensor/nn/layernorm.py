@@ -3,8 +3,8 @@ import numpy as np
 from tinytensor.core.tensor import Tensor, get_array_module
 from tinytensor.nn.modules import Module
 
-# нормализация по фичам а не по батчу как в бач
-# идеальна для текстов итрансформеров тк работает одинаково на любом batch size
+# нормализация по фичам (последняя ось), а не по батчу как в BatchNorm
+# идеальна для текстов/трансформеров тк работает одинаково на любом batch size
 # и не зависит от статистики по батчу
 class LayerNorm(Module):
     def __init__(self, normalized_shape, eps=1e-5):

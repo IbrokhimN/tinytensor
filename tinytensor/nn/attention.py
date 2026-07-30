@@ -6,8 +6,8 @@ from tinytensor.nn.linear import Linear
 from tinytensor.nn.activations import Softmax
 from tinytensor.nn.dropout import Dropout
 
-# механизм внимания Q,K,V, скор = Q@K^T / sqrt(d_k), softmax, @V
-# несколько голов считаются параллельно одной матрице без питон цикла по головам
+# механизм внимания: Q,K,V, скор = Q@K^T / sqrt(d_k), softmax, @V
+# несколько голов считаются параллельно одной матрицей, без питон-цикла по головам
 class MultiHeadAttention(Module):
     def __init__(self, embed_dim, num_heads, dropout=0.0, causal=False):
         super().__init__()
@@ -28,10 +28,12 @@ class MultiHeadAttention(Module):
         self.softmax = Softmax(dim=-1)
 
     def _split_heads(self, x, batch_size, seq_len):
+        # (batch, seq, embed) -> (batch, heads, seq, head_dim)
         x = x.reshape(batch_size, seq_len, self.num_heads, self.head_dim)
         return x.transpose(0, 2, 1, 3)
 
     def _merge_heads(self, x, batch_size, seq_len):
+        # (batch, heads, seq, head_dim) -> (batch, seq, embed)
         x = x.transpose(0, 2, 1, 3)
         return x.reshape(batch_size, seq_len, self.embed_dim)
 
