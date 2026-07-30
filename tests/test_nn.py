@@ -3,7 +3,7 @@ import numpy as np
 from tinytensor.core.tensor import Tensor
 from tinytensor.nn.modules import Module
 from tinytensor.nn.linear import Linear
-from tinytensor.nn.activations import ReLU, LeReLU, Sigmod, Tanh, GELU
+from tinytensor.nn.activations import ReLU, LeReLU, Sigmoid, Tanh, GELU
 
 
 def test_module_parameters_collects_only_requires_grad_tensors():
@@ -75,7 +75,7 @@ def test_leaky_relu_module():
 
 def test_sigmoid_module():
     x = Tensor([0.0])
-    out = Sigmod()(x)
+    out = Sigmoid()(x)
     assert np.allclose(out.data, [0.5])
 
 

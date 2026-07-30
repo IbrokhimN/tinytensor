@@ -49,14 +49,11 @@ def check_cuda():
 
 
 class CUDABuildExt(build_ext):
-    # если cuda-сборка все равно упадет (например линковка) - не роняем весь pip install,
-    # а просто откатываемся на чистый cpu-пакет
     def build_extensions(self):
         self.compiler.src_extensions.append('.cu')
         original_compile = self.compiler._compile
 
         def custom_compile(obj, src, ext, cc_args, extra_postargs, pp_opts):
-            # extra_postargs может приходить как список или словарь — обрабатываем оба случая
             if isinstance(extra_postargs, dict):
                 gcc_postargs = extra_postargs.get('gcc', [])
                 nvcc_postargs = extra_postargs.get('nvcc', [])
@@ -112,7 +109,7 @@ else:
 
 setup(
     name="pytinytensor",
-    version="0.1.7",
+    version="0.2.0",
     description="мини ИИ фреймворк от IbrokimN ( github/IbrokhimN )",
     long_description=long_description,
     long_description_content_type="text/markdown",

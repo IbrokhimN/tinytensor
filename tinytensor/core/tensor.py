@@ -5,9 +5,12 @@ from tinytensor.core.autograd import backward as run_backward
 #чекаем ес можно на cuda матричные умножения сделать
 try:
     from tinytensor import cuda_ops
+    import cupy as cp
     HAS_CUDA = True
 except ImportError:
+    cp = None
     HAS_CUDA = False
+
 
 
 def _unbroadcast(grad, target):
@@ -23,25 +26,66 @@ def _unbroadcast(grad, target):
 # этот мир жесток
 class Tensor:
     def __init__(self, data, requires_grad=False, device="cpu"):
-        # кароч проверка если нампай массив то оставляем а если нет то делаем нампаем
-        if isinstance(data, np.ndarray):
-            self.data = data.astype(np.float32)
-        else:
-            self.data = np.array(data, dtype=np.float32)
+        self.device = device
 
+        if isinstance(data, Tensor):
+            self.data = data.data
+            self.device = data.device
+        elif HAS_CUDA and self.device == 'cuda':
+            if isinstance(data, np.ndarray):
+                self.data = cp.asarray(data, dtype=cp.float32)
+            elif isinstance(data, cp.ndarray):
+                self.data = data
+            else:
+                self.data = cp.array(data, dtype=cp.float32)
+        else:
+            if HAS_CUDA and isinstance(data, cp.ndarray):
+                self.data = cp.asnumpy(data).astype(np.float32)
+            elif isinstance(data, np.ndarray):
+                self.data = data.astype(np.float32)
+            else:
+                self.data = np.array(data, dtype=np.float32)
+
+        self.requires_grad = requires_grad
         self.grad = None
         self._backward = lambda: None
         self._prev = set()
-        self.requires_grad = requires_grad
-        self.device = device
 
     def to(self, device):
         # перекидываем тензор на cuda или cpu
-        self.device = device
-        return self
+        device = str(device).lower()
+        if device == self.device:
+            return self
+        
+        if device == 'cuda':
+            if not HAS_CUDA:
+                raise RuntimeError("cuda или cupy недоступен")
+            
+            # с цпу на гпу
+            new_data = cp.asarray(self.data)
+            new_tensor = Tensor(new_data, requires_grad=self.requires_grad, device='cuda')
+            if self.grad is not None:
+                new_tensor.grad = cp.asarray(self.grad)
+            return new_tensor
+        
+        elif device == 'cpu':
+            if HAS_CUDA and isinstance(self.data, cp.ndarray):
+                new_data = cp.asnumpy(self.data)
+            else:
+                new_data = self.data
+                
+            new_tensor = Tensor(new_data, requires_grad=self.requires_grad, device='cpu')
+            if self.grad is not None and HAS_CUDA and isinstance(self.grad, cp.ndarray):
+                new_tensor.grad = cp.asnumpy(self.grad)
+            return new_tensor
 
+        else:
+            raise ValueError(f"нету устройства {device} напишите cpu или cuda")
+
+            
     def __repr__(self):
-        return f"tensor({self.data}, device='{self.device}', requires_grad={self.requires_grad})"
+        dev_str = f", device='{self.device}'" if self.device != 'cpu' else ""
+        return f"Tensor({self.data}{dev_str}, requires_grad={self.requires_grad})"
 
     @property
     def shape(self):
@@ -62,7 +106,7 @@ class Tensor:
             def _backward():
                 if self.requires_grad:
                     if self.grad is None:
-                        self.grad = np.zeros_like(self.data, dtype=np.float32)
+                        self.grad = get_array_module(self.data).zeros_like(self.data, dtype=np.float32)
 
                     grad_self = out.grad * 1.0
                     self.grad += _unbroadcast(grad_self, self.data.shape)
@@ -70,7 +114,7 @@ class Tensor:
                 # градиент для 2 параметра
                 if other.requires_grad:
                     if other.grad is None:
-                        other.grad = np.zeros_like(other.data, dtype=np.float32)
+                        other.grad = get_array_module(other.data).zeros_like(other.data, dtype=np.float32)
 
                     grad_other = out.grad * 1.0
                     other.grad += _unbroadcast(grad_other, other.data.shape)
@@ -98,13 +142,13 @@ class Tensor:
             def _backward():
                 if self.requires_grad:
                     if self.grad is None:
-                        self.grad = np.zeros_like(self.data, dtype=np.float32)
+                        self.grad = get_array_module(self.data).zeros_like(self.data, dtype=np.float32)
                     grad_self = out.grad * other.data
                     self.grad += _unbroadcast(grad_self, self.data.shape)
 
                 if other.requires_grad:
                     if other.grad is None:
-                        other.grad = np.zeros_like(other.data, dtype=np.float32)
+                        other.grad = get_array_module(other.data).zeros_like(other.data, dtype=np.float32)
                     grad_other = out.grad * self.data
                     other.grad += _unbroadcast(grad_other, other.data.shape)
 
@@ -118,12 +162,10 @@ class Tensor:
     # матричное умножение
     def __matmul__(self, other):
         other = other if isinstance(other, Tensor) else Tensor(other, device=self.device)
+        xp = get_array_module(self.data)
 
         # если девайс куда и бэкенд собрался то гоним через кублас а если нет то обычный нампай
-        if (self.device == "cuda" or other.device == "cuda") and HAS_CUDA:
-            res_data = cuda_ops.matmul(self.data, other.data)
-        else:
-            res_data = np.matmul(self.data, other.data)
+        res_data = xp.matmul(self.data, other.data)
 
         out = Tensor(
             res_data,
@@ -137,13 +179,15 @@ class Tensor:
             def _backward():
                 if self.requires_grad:
                     if self.grad is None:
-                        self.grad = np.zeros_like(self.data, dtype=np.float32)
-                    self.grad += np.matmul(out.grad, other.data.T)
+                        self.grad = xp.zeros_like(self.data, dtype=np.float32)
+                    grad_self = xp.matmul(out.grad, other.data.swapaxes(-1, -2))
+                    self.grad += _unbroadcast(grad_self, self.data.shape)
 
                 if other.requires_grad:
                     if other.grad is None:
-                        other.grad = np.zeros_like(other.data, dtype=np.float32)
-                    other.grad += np.matmul(self.data.T, out.grad)
+                        other.grad = xp.zeros_like(other.data, dtype=np.float32)
+                    grad_other = xp.matmul(self.data.swapaxes(-1, -2), out.grad)
+                    other.grad += _unbroadcast(grad_other, other.data.shape)
 
             out._backward = _backward
 
@@ -164,7 +208,7 @@ class Tensor:
             def _backward():
                 if self.requires_grad:
                     if self.grad is None:
-                        self.grad = np.zeros_like(self.data, dtype=np.float32)
+                        self.grad = get_array_module(self.data).zeros_like(self.data, dtype=np.float32)
                     self.grad += out.grad * (power * (self.data ** (power - 1)))
 
             out._backward = _backward
@@ -178,8 +222,8 @@ class Tensor:
             def _backward():
                 if self.requires_grad:
                     if self.grad is None:
-                        self.grad = np.zeros_like(self.data, dtype=np.float32)
-                    self.grad += out.grad * np.ones_like(self.data)
+                        self.grad = get_array_module(self.data).zeros_like(self.data, dtype=np.float32)
+                    self.grad += out.grad * get_array_module(self.data).ones_like(self.data)
 
             out._backward = _backward
         return out
@@ -192,15 +236,32 @@ class Tensor:
             def _backward():
                 if self.requires_grad:
                     if self.grad is None:
-                        self.grad = np.zeros_like(self.data, dtype=np.float32)
+                        self.grad = get_array_module(self.data).zeros_like(self.data, dtype=np.float32)
                     self.grad += out.grad.reshape(self.data.shape)
+
+            out._backward = _backward
+        return out
+
+    def transpose(self, *axes):
+        if len(axes) == 1 and isinstance(axes[0], (tuple, list)):
+            axes = tuple(axes[0])
+        out = Tensor(self.data.transpose(*axes), requires_grad=self.requires_grad, device=self.device)
+        if out.requires_grad:
+            out._prev = {self}
+            inv_axes = tuple(np.argsort(axes))
+
+            def _backward():
+                if self.requires_grad:
+                    if self.grad is None:
+                        self.grad = get_array_module(self.data).zeros_like(self.data, dtype=np.float32)
+                    self.grad += out.grad.transpose(*inv_axes)
 
             out._backward = _backward
         return out
 
     def relu(self):
         out = Tensor(
-            np.maximum(0, self.data),
+            get_array_module(self.data).maximum(0, self.data),
             requires_grad=self.requires_grad,
             device=self.device,
         )
@@ -211,7 +272,7 @@ class Tensor:
             def _backward():
                 if self.requires_grad:
                     if self.grad is None:
-                        self.grad = np.zeros_like(self.data, dtype=np.float32)
+                        self.grad = get_array_module(self.data).zeros_like(self.data, dtype=np.float32)
                     self.grad += out.grad * (self.data > 0)
 
             out._backward = _backward
@@ -219,7 +280,8 @@ class Tensor:
         return out
 
     def leaky_relu(self, alpha=0.01):
-        out_data = np.where(self.data > 0, self.data, self.data * alpha)
+        xp = get_array_module(self.data)
+        out_data = xp.where(self.data > 0, self.data, self.data * alpha)
         out = Tensor(out_data, requires_grad=self.requires_grad, device=self.device)
         if out.requires_grad:
             out._prev = {self}
@@ -227,15 +289,16 @@ class Tensor:
             def _backward():
                 if self.requires_grad:
                     if self.grad is None:
-                        self.grad = np.zeros_like(self.data, dtype=np.float32)
-                    dx = np.where(self.data > 0, 1.0, alpha)
+                        self.grad = xp.zeros_like(self.data, dtype=np.float32)
+                    dx = xp.where(self.data > 0, 1.0, alpha)
                     self.grad += out.grad * dx
 
             out._backward = _backward
         return out
 
     def sigmoid(self):
-        sig = 1.0 / (1.0 + np.exp(-np.clip(self.data, -50, 50)))
+        xp = get_array_module(self.data)
+        sig = 1.0 / (1.0 + xp.exp(-xp.clip(self.data, -50, 50)))
         out = Tensor(sig, requires_grad=self.requires_grad, device=self.device)
         if out.requires_grad:
             out._prev = {self}
@@ -243,14 +306,15 @@ class Tensor:
             def _backward():
                 if self.requires_grad:
                     if self.grad is None:
-                        self.grad = np.zeros_like(self.data, dtype=np.float32)
+                        self.grad = xp.zeros_like(self.data, dtype=np.float32)
                     self.grad += out.grad * (sig * (1.0 - sig))
 
             out._backward = _backward
         return out
 
     def tanh(self):
-        t = np.tanh(self.data)
+        xp = get_array_module(self.data)
+        t = xp.tanh(self.data)
         out = Tensor(t, requires_grad=self.requires_grad, device=self.device)
         if out.requires_grad:
             out._prev = {self}
@@ -258,15 +322,16 @@ class Tensor:
             def _backward():
                 if self.requires_grad:
                     if self.grad is None:
-                        self.grad = np.zeros_like(self.data, dtype=np.float32)
+                        self.grad = xp.zeros_like(self.data, dtype=np.float32)
                     self.grad += out.grad * (1.0 - t ** 2)
 
             out._backward = _backward
         return out
 
     def gelu(self):
+        xp = get_array_module(self.data)
         x = self.data
-        cdf = 0.5 * (1.0 + np.tanh(np.sqrt(2.0 / np.pi) * (x + 0.044715 * (x ** 3))))
+        cdf = 0.5 * (1.0 + xp.tanh(xp.sqrt(2.0 / np.pi) * (x + 0.044715 * (x ** 3))))
         out = Tensor(x * cdf, requires_grad=self.requires_grad, device=self.device)
         if out.requires_grad:
             out._prev = {self}
@@ -274,8 +339,8 @@ class Tensor:
             def _backward():
                 if self.requires_grad:
                     if self.grad is None:
-                        self.grad = np.zeros_like(self.data, dtype=np.float32)
-                    pdf = np.exp(-0.5 * (x ** 2)) / np.sqrt(2.0 * np.pi)
+                        self.grad = xp.zeros_like(self.data, dtype=np.float32)
+                    pdf = xp.exp(-0.5 * (x ** 2)) / xp.sqrt(2.0 * np.pi)
                     d_gelu = cdf + x * pdf
                     self.grad += out.grad * d_gelu
 
@@ -285,6 +350,12 @@ class Tensor:
     def backward(self):
         run_backward(self)
 
+
+def get_array_module(data):
+    if hasattr(type(data), "__module__") and "cupy" in type(data).__module__:
+        import cupy as cp
+        return cp
+    return np
 
 # ⣇⣿⠘⣿⣿⣿⡿⡿⣟⣟⢟⢟⢝⠵⡝⣿⡿⢂⣼⣿⣷⣌⠩⡫⡻⣝⠹⢿⣿⣷
 # ⡆⣿⣆⠱⣝⡵⣝⢅⠙⣿⢕⢕⢕⢕⢝⣥⢒⠅⣿⣿⣿⡿⣳⣌⠪⡪⣡⢑⢝⣇
@@ -300,3 +371,6 @@ class Tensor:
 # ⡕⡑⣑⣈⣻⢗⢟⢞⢝⣻⣿⣿⣿⣿⣿⣿⣿⠸⣿⠿⠃⣿⣿⣿⣿⣿⣿⡿⠁⣠
 # ⡝⡵⢟⢕⢕⢕⢕⣵⣿⣿⣿⣿⣿⣿⣿⣿⣿⣶⣶⣿⣿⣿⣿⣿⠿⠋⣀⣈⠙
 # ⡝⡵⡕⡀⠑⠳⠿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⠿⠛⢉⡠⡲⡫⡪⡪⡣
+
+
+

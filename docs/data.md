@@ -5,10 +5,10 @@
 ```python
 from tinytensor.data import Dataset, TensorDataset
 
-dataset = TensorDataset(x, y)   # x, y - numpy-массивы или списки одинаковой длины
+dataset = TensorDataset(x, y)   # x, y: numpy arrays or lists of equal length
 ```
 
-`TensorDataset` это просто обертка над парой `(x, y)` с `__len__`/`__getitem__`. Если нужен свой датасет (например с аугментациями или чтением с диска) - наследуйтесь от `Dataset` и переопределяйте те же два метода:
+`TensorDataset` is a thin wrapper over a `(x, y)` pair with `__len__`/`__getitem__`. For anything custom (augmentation, on-disk loading), subclass `Dataset` and override the same two methods:
 
 ```python
 class MyDataset(Dataset):
@@ -30,8 +30,8 @@ for xb, yb in loader:
     ...
 ```
 
-Бьет датасет на батчи, можно с shuffle (перемешивает индексы каждую новую эпоху, то есть на каждый `for ... in loader` заново). Мини-версия [`torch.utils.data.DataLoader`](https://pytorch.org/docs/stable/data.html), никакого multiprocessing/prefetch тут нет - все синхронно в основном потоке.
+Splits the dataset into batches, with optional shuffling (indices are reshuffled on every fresh `for ... in loader` pass, i.e. every epoch). A minimal analogue of [`torch.utils.data.DataLoader`](https://pytorch.org/docs/stable/data.html) — everything runs synchronously on the main thread, there is no multiprocessing or prefetching.
 
-`len(loader)` возвращает количество батчей за эпоху, округленное вверх (`ceil`), то есть последний батч может быть меньше `batch_size`, если размер датасета на него не делится ровно.
+`len(loader)` is the number of batches per epoch, rounded up (`ceil`), so the last batch may be smaller than `batch_size` if the dataset size isn't a multiple of it.
 
-`xb`/`yb` которые отдает `DataLoader` - уже готовые `Tensor`, руками оборачивать не надо.
+`xb`/`yb` yielded by `DataLoader` are already `Tensor` instances — no manual wrapping needed. Batches are assembled on CPU via `numpy`; if your `Dataset` stores `cuda`-backed `Tensor`s, move each batch with `.cuda()` after pulling it out of the loader rather than expecting the loader itself to handle mixed backends.

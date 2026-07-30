@@ -3,8 +3,25 @@ import pickle
 #кароч модуль от которого будут наследоваться все слои
 class Module:
     def __init__(self):
+        self._modules = {}
         self.training = True
-    
+
+    def to(self, device):
+        # переносим все параметры модели либо на cpu либо на cuda
+        for name, param in self.__dict__.items():
+            if isinstance(param, Tensor):
+                setattr(self, name, param.to(device))
+            elif isinstance(param, Module):
+                param.to(device)
+        return self
+
+
+    def cuda(self):
+        return self.to('cuda')
+
+    def cpu(self):
+        return self.to('cpu')
+
     def __call__(self, *args, **kwargs):
         return self.forward(*args, **kwargs)
     #щас это просто заглушка для прямого вызова, а в реале у всех должны быть свои реализации forward, так что это роль не играет
@@ -76,6 +93,11 @@ class Sequential(Module):
             params.extend(layer.parameters())
         return params
 
+    def to(self, device):
+        for layer in self.layers:
+            layer.to(device)
+        return self
+
     def _get_named_params(self, prefix=""):
         named = {}
         for i, layer in enumerate(self.layers):
@@ -94,3 +116,4 @@ class Sequential(Module):
 
     def __len__(self):
         return len(self.layers)
+

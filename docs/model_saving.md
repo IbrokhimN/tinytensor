@@ -1,15 +1,15 @@
-# Сохранение модели
+# Model Saving
 
-## Как пользоваться
+## Usage
 
 ```python
 model.save("model.tt")
 model.load("model.tt")
 ```
 
-Формат файла - `.tt`, внутри обычный pickle поверх `state_dict()`. Ничего особенного, просто словарь `{имя_параметра: numpy-массив}`.
+The `.tt` extension is just a convention — the file is a plain pickle of `state_dict()`, a `{parameter_name: array}` dict.
 
-## Как это устроено внутри
+## How it works internally
 
 ```python
 def state_dict(self):
@@ -33,18 +33,27 @@ def load(self, filepath):
         self.load_state_dict(sd)
 ```
 
-`_get_named_params` рекурсивно проходит по всем вложенным `Module` и собирает имена в стиле `fc1.weight`, `fc1.bias`, `fc2.weight` и тд, так что модель с несколькими слоями сохраняется/загружается целиком одним вызовом.
+`_get_named_params` recursively walks nested `Module`s, producing dotted names like `fc1.weight`, `fc1.bias`, `fc2.weight`, so a multi-layer model saves and loads in one call. `Sequential` overrides `_get_named_params` explicitly (it stores layers in a `self.layers` list, which the base implementation does not know how to walk into — without the override, `state_dict()` on a `Sequential` silently returns an empty dict and `load()` becomes a silent no-op).
 
-## Грабли, на которые уже наступали
+## Saving a GPU-resident model
 
-Открывать файл в правильном режиме - тут легко перепутать местами:
+`param.data` for a `cuda` tensor is a `cupy` array; pickling `cupy` arrays directly works but ties the checkpoint to having `cupy`/CUDA available wherever it's loaded back. Move the model to CPU before saving if you want a portable checkpoint:
 
-- `save` пишет в файл -> нужен режим `"wb"` (write binary)
-- `load` читает из файла -> нужен режим `"rb"` (read binary)
+```python
+model.cpu()
+model.save("model.tt")
+```
 
-Если перепутать (`save` в `"rb"` или `load` в `"wb"`) - либо упадет сразу с `io.UnsupportedOperation`, либо (что хуже) `load()` в режиме `"wb"` тихо затрет файл перед чтением, и потом `pickle.load` упадет на пустом файле. Мнемоника простая: save = **w**rite = "wb", load = **r**ead = "rb".
+## Gotchas already hit during development
 
-Второй баг, который тоже словили - `state_dict()` без `return` в конце. Функция честно собирает словарь `sdict`, но если забыть `return sdict` - метод всегда отдаст `None`, и `save()` тихо запишет в файл `None` вместо весов, без единой ошибки. Проверяйте после правок руками:
+File mode — easy to get backwards:
+
+- `save` writes to the file → needs `"wb"` (write binary)
+- `load` reads from the file → needs `"rb"` (read binary)
+
+Getting it backwards either raises `io.UnsupportedOperation` immediately, or — worse — `load()` opened in `"wb"` silently truncates the file before `pickle.load` even runs, so it fails on an empty file with a confusing error.
+
+Missing `return sdict` at the end of `state_dict()` is the other one that bit us: the function builds the dict correctly but forgets to return it, so `state_dict()` returns `None` and `save()` writes a pickled `None` to disk with zero errors raised anywhere. Sanity check after any change to this code path:
 
 ```python
 before = model.weight.data.copy()
@@ -54,7 +63,7 @@ model2.load("test.tt")
 assert (before == model2.weight.data).all()
 ```
 
-## Ограничения
+## Limitations
 
-- Оптимизатор (`m`/`v`-буферы AdamW, `velocities` у SGD) в `.tt` не сохраняются, только веса модели. Если продолжаете обучение после загрузки - оптимизатор стартует с чистых буферов.
-- Формат не versioned - если поменяете архитектуру модели (добавите/уберете слой) и попробуете загрузить старый `.tt`, часть весов из `state_dict` просто не найдет соответствия и будет молча проигнорирована (`if name in sdict`), без предупреждения. Так что храните рядом с чекпоинтом информацию о версии архитектуры сами, если это важно.
+- Optimizer state (`AdamW`'s `m`/`v` buffers, `SGD`'s momentum buffers) is **not** saved, only model weights. Resuming training after a load restarts the optimizer from a clean state.
+- The format is not versioned. Loading a `.tt` file into a model with a different architecture silently ignores any parameter names that don't match (`if name in sdict`) — no warning, no error. Track architecture versions yourself if that matters for your use case.

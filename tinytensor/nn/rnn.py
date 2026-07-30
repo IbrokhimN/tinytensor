@@ -97,9 +97,9 @@ class RNN(Module):
         h = h_0
         outputs = []
 
-        #по циклу по времени т
+        #по циклу по времени
         for t in range(seq_len):
-            x_t = Tensor(x.data[:, t, :], requires_grad=x.requires_grad)
+            x_t = Tensor(x.data[:, t, :], requires_grad=x.requires_grad, device=x.device)
 
             if x.requires_grad:
                 x_t._prev = {x}

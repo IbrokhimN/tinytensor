@@ -1,64 +1,53 @@
 # tinytensor
 
-Новые доки напишу в след версии 
+A small, dependency-light autograd engine and neural network toolkit built on top of NumPy. It implements a reverse-mode automatic differentiation engine (the same core idea as [micrograd](https://github.com/karpathy/micrograd)), a set of standard layers (Linear, Conv2d, RNN, Embedding, BatchNorm2d, Dropout...), optimizers, a data pipeline, and an optional CUDA backend via `cupy` for real GPU-resident tensors.
 
-Маленький самописный autograd на numpy. Тензоры, backprop, пара слоев,
-лоссы, оптимизаторы и даталоадер. По сути свой мини-pytorch, только без
-плюшек и без cuda (пока).
+It is not a PyTorch replacement in terms of performance or ecosystem. It exists to be small enough to read end to end in an evening, while still being capable enough to train real convolutional and recurrent models on real data (MNIST, small RNN language models).
 
-Никакой производительности тут не ищите, тут просто видно как все
-устроено внутри, без магии.
+## Contents
 
-## Содержание
+- [Installation](#installation)
+- [Documentation](#documentation)
+- [Quickstart](#quickstart)
+- [What's implemented](#whats-implemented)
+- [Project layout](#project-layout)
+- [Known limitations](#known-limitations)
+- [References](#references)
 
-- [Установка](#установка)
-- [Документация](#документация)
-- [Быстрый старт](#быстрый-старт)
-- [Как работает autograd](#как-работает-autograd)
-- [API](#api)
-- [Примеры](#примеры)
-- [Тесты](#тесты)
-- [Структура](#структура)
-- [Чего нет](#чего-нет)
-- [Ссылки](#ссылки)
+## Installation
 
-## Установка
+```bash
+pip install pytinytensor
+```
+
+From source:
 
 ```bash
 git clone https://github.com/IbrokhimN/tinytensor
 cd tinytensor
-pip install -e .          # обычная установка
-pip install -e .[dev]     # плюс pytest, если хотите гонять тесты
+pip install -e .          # base install
+pip install -e .[dev]     # + pytest for running the test suite
 ```
 
-Или руками:
+The only hard dependency is `numpy`. `pybind11` is required at build time for the optional CUDA extension, and `cupy` is required at *runtime* for actual GPU-resident tensors (`device="cuda"`). If `nvcc` plus `libcudart`/`libcublas` are found at install time, the CUDA extension is compiled; if `cupy` is also importable at runtime, `HAS_CUDA` is `True` and `.to("cuda")`/`.cuda()` move tensor data onto the GPU for real. If either piece is missing, everything silently falls back to a pure-NumPy CPU path — the install never fails because of a missing CUDA toolchain. See [docs/cuda.md](docs/cuda.md).
 
-```bash
-pip install -r requirements.txt
-```
+## Documentation
 
-Зависимость одна - numpy.
+- [docs/getting_started.md](docs/getting_started.md) — installation, quickstart, first training loop
+- [docs/tensor_and_autograd.md](docs/tensor_and_autograd.md) — how `Tensor` and `backward()` work, gradient formulas, CPU/GPU backend resolution
+- [docs/nn.md](docs/nn.md) — every layer: `Linear`, `Conv2d`, `MaxPool2d`/`AvgPool2d`, `BatchNorm2d`, `Flatten`, `Embedding`, `RNNCell`/`RNN`, activations, `Dropout`, `Sequential`, loss functions
+- [docs/optim.md](docs/optim.md) — `SGD`, `AdamW`, `StepLR`, `clip_grad_norm_`
+- [docs/data.md](docs/data.md) — `Dataset`, `TensorDataset`, `DataLoader`
+- [docs/utils.md](docs/utils.md) — `progress_bar`, `EarlyStopping`, `summary`
+- [docs/model_saving.md](docs/model_saving.md) — `save`/`load`, `.tt` format
+- [docs/cuda.md](docs/cuda.md) — the CUDA backend (build + runtime), `get_array_module`, troubleshooting
+- [docs/faq.md](docs/faq.md) — issues that have already come up during development, kept here so they don't come up twice
 
-## Документация
-
-Все подробности разложены по [`docs/`](docs/), README тут больше как входная дверь:
-
-- [docs/getting_started.md](docs/getting_started.md) - установка, quickstart
-- [docs/tensor_and_autograd.md](docs/tensor_and_autograd.md) - как устроен Tensor и backward
-- [docs/nn.md](docs/nn.md) - Module, Linear, активации, Dropout, MSELoss
-- [docs/optim.md](docs/optim.md) - SGD, AdamW
-- [docs/data.md](docs/data.md) - Dataset, DataLoader
-- [docs/utils.md](docs/utils.md) - progress_bar, EarlyStopping
-- [docs/model_saving.md](docs/model_saving.md) - save/load модели
-- [docs/cuda.md](docs/cuda.md) - опциональный cuda-бэкенд
-- [docs/faq.md](docs/faq.md) - грабли, на которые уже наступили
-
-## Быстрый старт
+## Quickstart
 
 ```python
 from tinytensor.core.tensor import Tensor
-from tinytensor.nn.linear import Linear
-from tinytensor.nn.losses import MSELoss
+from tinytensor.nn import Linear, MSELoss
 from tinytensor.optim import SGD
 
 model = Linear(in_features=1, out_features=1)
@@ -78,143 +67,80 @@ for epoch in range(100):
 print(model.weight.data, model.bias.data)  # ~2.0, ~1.0
 ```
 
-Рабочие примеры целиком лежат в [`examples/`](examples/).
+Moving a whole model to the GPU (if `cupy` + the CUDA extension are available):
 
-## Как работает autograd
-
-У каждого `Tensor` есть:
-
-- `data` - сами значения (numpy-массив, всегда float32);
-- `grad` - градиент, пока не посчитан - None;
-- `_prev` - от каких тензоров он произошел (родители в графе);
-- `_backward` - функция которая знает как раскидать градиент на родителей.
-
-Когда считаете `z = f(x, y)`, по цепному правилу:
-
-```
-dL/dx = dL/dz * dz/dx
-dL/dy = dL/dz * dz/dy
+```python
+model.cuda()               # or model.to("cuda")
+x = x.cuda()
+pred = model(x)             # runs on cupy-backed tensors, gradients too
 ```
 
-`backward()` строит топологический порядок графа (`tinytensor/core/autograd.py`),
-ставит корню градиент = 1 и идет в обратном порядке, вызывая `_backward()`
-у каждого узла. Ровно так же устроен micrograd Карпатова, только у него
-даже покомпактнее:
+A CNN trained on real MNIST digits, and a small RNN language model trained with `Embedding` + `RNN` + `CrossEntropyLoss`, are both fully working end to end — see [docs/nn.md](docs/nn.md) for architecture examples.
 
-- [Karpathy - micrograd](https://github.com/karpathy/micrograd) - реализация того же самого на ~100 строк, must see
-- [CS231n: Backpropagation, Intuitions](https://cs231n.github.io/optimization-2/) - если нужно разложить backprop по полочкам
-- [colah - Calculus on Computational Graphs](https://colah.github.io/posts/2015-08-Backprop/)
+## What's implemented
 
-Если совсем в тему - есть видос Карпатова где он с нуля пишет micrograd и
-объясняет каждую строчку: ["The spelled-out intro to neural networks and backpropagation"](https://www.youtube.com/watch?v=VMj-3S1tku0).
-Собственно тут все то же самое, только на numpy и чуть пошире.
+**Core**
+- `Tensor` with reverse-mode autograd: `+ - * @ **`, `.sum()`, `.reshape()`, `.transpose()`, broadcasting-aware gradients, correct gradients through batched (4D+) matrix multiplication
+- Backend resolved per-tensor via `get_array_module()` — every op (not just matmul) dispatches to `numpy` or `cupy` depending on where the data actually lives, so gradients stay on the correct device throughout a training step
+- Activations with gradients: `relu`, `leaky_relu`, `sigmoid`, `tanh`, `gelu`
 
-### Формулы, которые реализованы в Tensor
+**Layers (`tinytensor.nn`)**
+- `Linear`, `Sequential`
+- `Conv2d`, `MaxPool2d`, `AvgPool2d`, `Flatten`, `BatchNorm2d` — full backward via im2col/col2im, gradient-checked
+- `LayerNorm` — feature-axis normalization, used by the transformer block below
+- `MultiHeadAttention` — scaled dot-product self-attention with optional causal masking, gradient-checked through a full multi-head block
+- `Embedding` — lookup table with scatter-add gradient
+- `RNNCell`, `RNN` — full backpropagation through time (BPTT)
+- `ReLU`, `LeReLU`, `Sigmoid`, `Tanh`, `GELU`, `Softmax`
+- `Dropout` — inverted dropout, gated by `model.train()`/`model.eval()`, backend-aware mask generation
+- `MSELoss`, `CrossEntropyLoss`
+- `Module.to(device)` / `.cuda()` / `.cpu()` — recursively move every parameter (and every submodule, including inside `Sequential`) between devices
 
-| операция | вперед | производная |
-|---|---|---|
-| `a + b` | `a + b` | `dL/da += dL/dz`, `dL/db += dL/dz` (плюс схлопывание по broadcast-осям) |
-| `a * b` | `a * b` | `dL/da += dL/dz * b`, `dL/db += dL/dz * a` |
-| `a @ b` | matmul | `dL/da += dL/dz @ bᵀ`, `dL/db += aᵀ @ dL/dz` |
-| `a ** p` | `aᵖ` | `dL/da += dL/dz * p * a^(p-1)` |
-| ReLU | `max(0, x)` | 1 при x>0, иначе 0 |
-| LeakyReLU | x или αx | 1 при x>0, иначе α |
-| sigmoid | `1/(1+e⁻ˣ)` | `σ(x)*(1-σ(x))` |
-| tanh | `tanh(x)` | `1 - tanh²(x)` |
-| GELU | `0.5x(1+tanh(√(2/π)(x+0.044715x³)))` | см. [статью по GELU](https://arxiv.org/abs/1606.08415), формула там не самая короткая |
+**Optimization (`tinytensor.optim`)**
+- `SGD` (with momentum), `AdamW` (decoupled weight decay)
+- `StepLR` learning rate scheduler
+- `clip_grad_norm_`
 
-Про broadcasting и почему градиент иногда надо досуммировать обратно
-(`_unbroadcast`) норм объясняют [правила broadcasting в numpy](https://numpy.org/doc/stable/user/basics.broadcasting.html).
+**Data (`tinytensor.data`)**
+- `Dataset`, `TensorDataset`, `DataLoader` with shuffling and batching
 
-## API
+**Utilities (`tinytensor.utils`)**
+- `progress_bar` / `train_bar`, `EarlyStopping`, `summary()` (architecture + parameter count printout)
 
-### Tensor
+**Model persistence**
+- `Module.save()` / `Module.load()` — pickle-based `state_dict`, `.tt` extension, works recursively through nested modules and `Sequential`
 
-`tinytensor.core.tensor.Tensor` - главный класс. Есть `+ - * @ **`, `.sum()`,
-активации `relu / leaky_relu / sigmoid / tanh / gelu`, ну и `.backward()`.
-
-### nn
-
-- `Module` - от него наследуются все слои, `forward / parameters() / zero_grad()`, по духу как [`torch.nn.Module`](https://pytorch.org/docs/stable/generated/torch.nn.Module.html);
-- `Linear(in_features, out_features)` - обычный `y = xW + b`, веса инициализируются по [He/Kaiming init](https://arxiv.org/abs/1502.01852) (`std = sqrt(2/in_features)`);
-- `ReLU, LeReLU, Sigmod, Tanh, GELU` - тонкие обертки над методами Tensor;
-- `MSELoss` - `mean((pred - target)^2)`, банальщина.
-
-### optim
-
-- `SGD(params, lr, momentum=0.0)` - обычный градиентный спуск, можно с моментом;
-- `AdamW(params, lr, betas, eps, weight_decay)` - Adam с отдельным weight decay, см. [Loshchilov & Hutter](https://arxiv.org/abs/1711.05101) (в отличие от обычного [Adam](https://arxiv.org/abs/1412.6980), decay тут не лезет в градиент, а сразу режет веса).
-
-### data
-
-- `Dataset / TensorDataset` - обертка над (x, y);
-- `DataLoader` - бьет на батчи, можно с shuffle, мини-версия [`torch.utils.data.DataLoader`](https://pytorch.org/docs/stable/data.html).
-
-## Примеры
-
-- [`examples/01_linear_regression.py`](examples/01_linear_regression.py) - линейная регрессия, Linear + MSELoss + SGD на `y = 3x + 2 + шум`.
-- [`examples/02_mnist_mlp.py`](examples/02_mnist_mlp.py) - MLP (Linear -> ReLU -> Linear) с AdamW и DataLoader на синтетике в формате mnist (784 фичи, 10 классов). Настоящего mnist и загрузчиков датасетов тут нет, лень было тащить.
-
-Как выглядит запуск вживую:
-
-```
-$ python3 01_linear_regression.py
-epoch   0 | loss 30.8016
-epoch 180 | loss 0.2365
-выученные параметры: weight ~ 2.995, bias ~ 1.996
-
-$ python3 02_mnist_mlp.py
-epoch 1/5 | avg loss 2.0998
-epoch 5/5 | avg loss 0.0481
-```
-
-## Тесты
-
-```bash
-pip install -e .[dev]
-python3 -m pytest tests/ -v
-```
-
-47 штук, гоняют арифметику тензоров и broadcasting, autograd (накопление
-градиента, топология, повторный backward), лоссы, оптимизаторы и
-Dataset/DataLoader.
-
-> Важно: запускать через pytest из корня репы (или после `pip install -e .`),
-> а не `python3 test_x.py` из папки tests - иначе tinytensor просто не найдется.
-
-## Структура
+## Project layout
 
 ```
 tinytensor/
 ├── tinytensor/
-│   ├── core/        # Tensor, autograd, ops
-│   ├── nn/          # Module, Linear, активации, MSELoss
-│   ├── optim/        # SGD, AdamW
-│   ├── data/         # Dataset, DataLoader
-│   ├── backends/     # заготовка под cuda, пока пусто
-│   └── config.py     # сид рандома
+│   ├── core/        # Tensor, autograd engine, ops
+│   ├── nn/          # layers, activations, losses
+│   ├── optim/       # SGD, AdamW, StepLR
+│   ├── data/        # Dataset, DataLoader
+│   ├── backends/    # cpu_numpy.py + cuda_gpu.cu / cuda_binding.cpp (cuBLAS)
+│   ├── utils/       # progress_bar, EarlyStopping, summary
+│   └── config.py    # random seed helper
 ├── examples/
 ├── tests/
+├── docs/
 ├── setup.py
 └── requirements.txt
 ```
 
-## Чего нет
+## Known limitations
 
-- Только numpy-backend, cuda_gpu.py пустой файл-заглушка.
-- Нет кросс-энтропии, сверток, рекуррентных слоев, сохранения модели (см. ToDo в исходном плане проекта).
-- backward не кэширует граф между вызовами, каждый раз строит топологию заново, как и в micrograd - никакой лени в духе pytorch тут нет.
+- `MultiHeadAttention` covers self-attention; there's no cross-attention variant, no relative/rotary position encodings, and `train_gpt.py` uses plain learned positional embeddings.
+- `Conv2d`/`Sequential`/`RNN` forward passes are implemented directly against array data rather than composed purely out of `Tensor` operations, so each of them ships its own manually written `backward()` closure — verified against numerical gradient checking, but this means adding a new layer requires writing its gradient by hand rather than getting it for free from existing ops.
+- `backward()` rebuilds the computation graph's topological order from scratch on every call (same approach as micrograd) — there is no graph caching or `retain_graph` equivalent.
+- GPU support depends on `cupy` being installed and importable at runtime; the bundled `cuBLAS`/`pybind11` extension built at install time is only used as an availability signal (`HAS_CUDA`), actual GPU compute goes through `cupy`'s own kernels.
+- Single-threaded `DataLoader`, no multiprocessing/prefetching.
 
-## Ссылки
+## References
 
-- [Andrej Karpathy - micrograd (GitHub)](https://github.com/karpathy/micrograd) - основной референс для всего autograd
-- [Andrej Karpathy - видео про backprop и micrograd](https://www.youtube.com/watch?v=VMj-3S1tku0)
-- [CS231n - Backpropagation, Intuitions](https://cs231n.github.io/optimization-2/)
-- [colah - Calculus on Computational Graphs](https://colah.github.io/posts/2015-08-Backprop/)
-- [NumPy broadcasting rules](https://numpy.org/doc/stable/user/basics.broadcasting.html)
-- [He et al. - инициализация весов](https://arxiv.org/abs/1502.01852)
-- [Kingma & Ba - Adam](https://arxiv.org/abs/1412.6980)
-- [Loshchilov & Hutter - AdamW](https://arxiv.org/abs/1711.05101)
-- [Hendrycks & Gimpel - GELU](https://arxiv.org/abs/1606.08415)
-- [PyTorch - torch.nn.Module](https://pytorch.org/docs/stable/generated/torch.nn.Module.html)
-- [PyTorch - torch.utils.data.DataLoader](https://pytorch.org/docs/stable/data.html)
+- [Andrej Karpathy — micrograd](https://github.com/karpathy/micrograd)
+- [Andrej Karpathy — "The spelled-out intro to neural networks and backpropagation"](https://www.youtube.com/watch?v=VMj-3S1tku0)
+- [CS231n — Backpropagation, Intuitions](https://cs231n.github.io/optimization-2/)
+- [Loshchilov & Hutter — Decoupled Weight Decay Regularization (AdamW)](https://arxiv.org/abs/1711.05101)
+- [CuPy documentation](https://docs.cupy.dev/en/stable/)

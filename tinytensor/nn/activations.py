@@ -16,7 +16,7 @@ class LeReLU(Module):
     def forward(self, x):
         return x.leaky_relu(alpha=self.alpha)
     
-class Sigmod(Module):
+class Sigmoid(Module):
     def forward(self, x):
         return x.sigmoid()
     
