@@ -23,6 +23,8 @@ class MyLayer(Module):
 - `train(mode=True)` / `eval()` — recursively sets `self.training` on this module and every submodule (needed for `Dropout` and for `BatchNorm2d`'s running-stats behavior)
 - `to(device)` / `.cuda()` / `.cpu()` — recursively moves every parameter and submodule between `numpy` and `cupy` storage
 - `state_dict()` / `load_state_dict()` / `save()` / `load()` — see [model_saving.md](model_saving.md)
+- `compile(optimizer, loss)` / `fit(...)` / `evaluate(...)` — optional keras-style training on top of the manual loop — see [training.md](training.md)
+- `quant()` — post-training INT8 quantization of every `Linear` in the tree — see [quantization.md](quantization.md)
 
 Modeled on [`torch.nn.Module`](https://pytorch.org/docs/stable/generated/torch.nn.Module.html), without hooks or buffers.
 

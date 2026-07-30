@@ -36,6 +36,8 @@ The only hard dependency is `numpy`. `pybind11` is required at build time for th
 - [docs/getting_started.md](docs/getting_started.md) — installation, quickstart, first training loop
 - [docs/tensor_and_autograd.md](docs/tensor_and_autograd.md) — how `Tensor` and `backward()` work, gradient formulas, CPU/GPU backend resolution
 - [docs/nn.md](docs/nn.md) — every layer: `Linear`, `Conv2d`, `MaxPool2d`/`AvgPool2d`, `BatchNorm2d`, `Flatten`, `Embedding`, `RNNCell`/`RNN`, activations, `Dropout`, `Sequential`, loss functions
+- [docs/training.md](docs/training.md) — the two training styles: the manual loop and keras-style `compile` / `fit` / `evaluate` (with early stopping)
+- [docs/quantization.md](docs/quantization.md) — post-training INT8 quantization: `model.quant()`, the math, saving/loading quantized models
 - [docs/optim.md](docs/optim.md) — `SGD`, `AdamW`, `StepLR`, `clip_grad_norm_`
 - [docs/data.md](docs/data.md) — `Dataset`, `TensorDataset`, `DataLoader`
 - [docs/utils.md](docs/utils.md) — `progress_bar`, `EarlyStopping`, `summary`
@@ -95,6 +97,13 @@ A CNN trained on real MNIST digits, and a small RNN language model trained with 
 - `Dropout` — inverted dropout, gated by `model.train()`/`model.eval()`, backend-aware mask generation
 - `MSELoss`, `CrossEntropyLoss`
 - `Module.to(device)` / `.cuda()` / `.cpu()` — recursively move every parameter (and every submodule, including inside `Sequential`) between devices
+
+**Training**
+- Manual training loop (torch-style), or keras-style `model.compile()` / `model.fit()` / `model.evaluate()` — both fully supported, `fit` is just the manual loop wrapped in a method
+- `fit` takes raw arrays or a `DataLoader`, returns a per-epoch `history`, supports `validation_data` and `patience` (early stopping via the `EarlyStopping` utility)
+
+**Quantization**
+- `model.quant()` — post-training INT8 quantization of `Linear` layers: per-channel int8 weights + float scale, dynamic activation quantization, real `int8 @ int8` integer matmul, ~4x smaller checkpoints
 
 **Optimization (`tinytensor.optim`)**
 - `SGD` (with momentum), `AdamW` (decoupled weight decay)
