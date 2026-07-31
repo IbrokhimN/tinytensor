@@ -30,6 +30,23 @@ class Linear(Module):
             out = out + self.bias
         return out
 
+    # ---------- structured pruning ----------
+
+    def _prune_outputs(self, idx):
+        # режем выходные нейроны (столбцы) текущего слоя
+        new_w = np.delete(self.weight.data, idx, axis=1)
+        self.weight = Tensor(new_w, requires_grad=True, device=self.device)
+        if self.bias is not None:
+            new_b = np.delete(self.bias.data, idx, axis=1)
+            self.bias = Tensor(new_b, requires_grad=True, device=self.device)
+        self.out_features = self.out_features - len(idx)
+
+    def _prune_inputs(self, idx):
+        new_w = np.delete(self.weight.data, idx, axis=0)
+        self.weight = Tensor(new_w, requires_grad=True, device=self.device)
+        self.in_features = self.in_features - len(idx)
+
+    # ---------- int8 квантизация ----------
 
     @staticmethod
     def _quant_symmetric(arr, axis=None):
@@ -84,14 +101,3 @@ class Linear(Module):
             self.weight = None
             self.bias = None
             self.quantized = True
-
-
-    # прунинг
-    # def _prune_outputs(self, idx):
-    #    # режем выходные нейроны (столбцы) текущего слоя
-    #    new_w = np.delete(self.weight.data, idx, axis=1)
-    #    self.weight = Tensor(new_w, requires_grad=True, device=self.device)
-    #    if self.bias is not None:
-    #        new_b = np.delete(self.bias.data, idx, axis=1)
-    #        self.bias = Tensor(new_b, requires_grad=True, device=self.device)
-    #    self.out_features = self.out_features - len(idx)

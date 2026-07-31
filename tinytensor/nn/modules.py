@@ -72,6 +72,7 @@ class Module:
         from tinytensor.data import TensorDataset, DataLoader
         from tinytensor.core.tensor import Tensor
         from tinytensor.utils import EarlyStopping
+
         if not hasattr(self, "_optimizer") or not hasattr(self, "_loss_fn"):
             raise RuntimeError("Сначала вызови model.compile(optimizer, loss)")
 
@@ -86,9 +87,10 @@ class Module:
         history = {"loss": []}
         if validation_data is not None:
             history["val_loss"] = []
-        
+
         if patience is not None:
             es = EarlyStopping(self, patience=patience)
+
         self.train()
 
         for epoch in range(epochs):
@@ -122,8 +124,9 @@ class Module:
                 line += f"  val_loss={val_loss:.4f}"
                 if patience is not None:
                     if es(val_loss):
-                        print("раняя остановка")
+                        print("ранняя остановка")
                         break
+
             if verbose:
                 print(line)
 
@@ -266,4 +269,59 @@ class Sequential(Module):
 
     def __len__(self):
         return len(self.layers)
+
+    def prune(self, amount=0.3):
+        from tinytensor.nn.linear import Linear
+        for i, layer in enumerate(self.layers):
+            if not isinstance(layer, Linear):
+                continue
+            nxt = None
+            for j in range(i + 1, len(self.layers)):
+                if isinstance(self.layers[j], Linear):
+                    nxt = self.layers[j]
+                    break
+
+            if nxt is None:
+                continue
+            w = layer.weight.data
+            importance = np.linalg.norm(w, axis=0)
+            deleting = int(layer.out_features * amount)
+            if deleting == 0:
+                continue
+
+            idx = np.argsort(importance)[:deleting]
+            layer._prune_outputs(idx)
+            nxt._prune_inputs(idx)
+
+        return self
+
+    def to_onnx(self, path, input_dim):
+        import onnx
+        from onnx import helper, TensorProto, numpy_helper
+        from tinytensor.nn.linear import Linear
+        from tinytensor.nn.activations import ReLU
+        nodes = []
+        initializers = []
+        cur = "input"
+        for i, layer in enumerate(self.layers):
+            #Gemm
+            if isinstance(layer, Linear):
+                w_init = numpy_helper.from_array(layer.weight.data, name=f"W{i}")
+                b_init = numpy_helper.from_array(layer.bias.data, name=f"B{i}")
+                initializers.extend([w_init, b_init])
+
+                node = helper.make_node("Gemm", inputs=[cur, f"W{i}", f"B{i}"], outputs=[f"h{i}"])
+                nodes.append(node)
+                cur = f"h{i}"
+
+            #Relu
+            elif isinstance(layer, ReLU):
+                node = helper.make_node("Relu", inputs=[cur], outputs=[f"h{i}"])
+                nodes.append(node)
+                cur = f"h{i}"
+        inp = helper.make_tensor_value_info("input", TensorProto.FLOAT, ["N", input_dim])
+        out = helper.make_tensor_value_info(cur, TensorProto.FLOAT, ["N", self.layers[-1].out_features])
+        graph = helper.make_graph(nodes, "model", [inp], [out], initializers)
+        model = helper.make_model(graph, opset_imports=[helper.make_opsetid("", 17)])
+        onnx.save(model, path)
 
