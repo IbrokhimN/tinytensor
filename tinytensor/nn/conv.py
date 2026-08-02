@@ -1,6 +1,6 @@
 import numpy as np 
 
-from tinytensor.core.tensor import Tensor
+from tinytensor.core.tensor import Tensor, get_array_module
 from tinytensor.nn.modules import Module
 from tinytensor.nn.functional import im2col_indices, col2_im_indices
 
@@ -56,22 +56,23 @@ class Conv2d(Module):
 
             def _backward():
                 dout = out.grad
+                xp = get_array_module(dout)
                 dout_reshaped = dout.transpose(1, 2, 3, 0).reshape(self.out_channels, -1)
 
                 if self.weight.requires_grad:
                     if self.weight.grad is None:
-                        self.weight.grad = np.zeros_like(self.weight.data, dtype=np.float32)
+                        self.weight.grad = xp.zeros_like(self.weight.data, dtype=np.float32)
                     dW = dout_reshaped @ x_col.T
                     self.weight.grad += dW.reshape(self.weight.data.shape)
 
                 if self.bias.requires_grad:
                     if self.bias.grad is None:
-                        self.bias.grad = np.zeros_like(self.bias.data, dtype=np.float32)
-                    self.bias.grad += np.sum(dout_reshaped, axis=1, keepdims=True)
+                        self.bias.grad = xp.zeros_like(self.bias.data, dtype=np.float32)
+                    self.bias.grad += xp.sum(dout_reshaped, axis=1, keepdims=True)
 
                 if x.requires_grad:
                     if x.grad is None:
-                        x.grad = np.zeros_like(x.data, dtype=np.float32)
+                        x.grad = xp.zeros_like(x.data, dtype=np.float32)
                     dx_col = w_row.T @ dout_reshaped
                     dx = col2_im_indices(
                         dx_col, x.data.shape, self.kh, self.kw,

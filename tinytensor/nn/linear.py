@@ -4,10 +4,13 @@ from tinytensor.core.tensor import Tensor, HAS_CUDA, cp
 from tinytensor.nn.modules import Module
 
 class Linear(Module):
-    def __init__(self, in_features, out_features, bias=True, device="cpu"):
+    def __init__(self, in_features, out_features, bias=True, device=None):
         super().__init__()
         self.in_features = in_features
         self.out_features = out_features
+        if device is None:
+            from tinytensor.config import config
+            device = config.default_device
         self.device = str(device).lower()
 
         std = np.sqrt(2.0 / in_features)

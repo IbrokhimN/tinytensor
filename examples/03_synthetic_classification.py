@@ -3,7 +3,7 @@ import numpy as np
 from tinytensor.core.tensor import Tensor
 from tinytensor.nn.linear import Linear
 from tinytensor.nn.dropout import Dropout
-from tinytensor.nn.sequential import Sequential
+from tinytensor.nn import Sequential
 from tinytensor.nn.losses import CrossEntropyLoss
 from tinytensor.optim.optimizer import AdamW
 

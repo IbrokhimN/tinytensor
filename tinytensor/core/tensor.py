@@ -25,7 +25,10 @@ def _unbroadcast(grad, target):
 
 # этот мир жесток
 class Tensor:
-    def __init__(self, data, requires_grad=False, device="cpu"):
+    def __init__(self, data, requires_grad=False, device=None):
+        if device is None:
+            from tinytensor.config import config
+            device = config.default_device
         self.device = device
 
         if isinstance(data, Tensor):
