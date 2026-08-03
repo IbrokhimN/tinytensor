@@ -12,6 +12,8 @@ _MNIST_FILES = {
     "test_labels": "t10k-labels-idx1-ubyte.gz",
 }
 
+_FASHION_URL = "https://raw.githubusercontent.com/zalandoresearch/fashion-mnist/master/data/fashion/"
+
 def _download(url, path):
     if not os.path.exists(path):
         urllib.request.urlretrieve(url, path)
@@ -25,7 +27,7 @@ def _read_gz(path, header_size):
 
 
 #mnist 
-def load_mnist(data_dir="./data"):
+def load_mnist(data_dir="./data_mnist", normalize=True):
     os.makedirs(data_dir, exist_ok=True)
 
     for key, filename in _MNIST_FILES.items():
@@ -37,10 +39,40 @@ def load_mnist(data_dir="./data"):
     y_train = _read_gz(os.path.join(data_dir, _MNIST_FILES["train_labels"]), 8)
     x_test  = _read_gz(os.path.join(data_dir, _MNIST_FILES["test_images"]), 16)
     y_test  = _read_gz(os.path.join(data_dir, _MNIST_FILES["test_labels"]), 8)
-    
-    x_train = x_train.reshape(-1, 28, 28)
-    x_test = x_test.reshape(-1, 28, 28)
+     
+    if normalize:
+        x_train = (x_train.reshape(-1, 1, 28, 28) / 255.0).astype(np.float32)
+        x_test  = (x_test.reshape(-1, 1, 28, 28) / 255.0).astype(np.float32)
+    else:
+        x_train = x_train.reshape(-1, 28, 28)
+        x_test  = x_test.reshape(-1, 28, 28)
     return (x_train, y_train), (x_test, y_test)
+
+#fashion
+def load_fashion(data_dir="./data_fashion", normalize=True):
+    os.makedirs(data_dir, exist_ok=True)
+
+    for key, filename in _MNIST_FILES.items():
+        url = _FASHION_URL + filename
+        path = os.path.join(data_dir, filename)
+        _download(url, path)
+
+    x_train = _read_gz(os.path.join(data_dir, _MNIST_FILES["train_images"]), 16)
+    y_train = _read_gz(os.path.join(data_dir, _MNIST_FILES["train_labels"]), 8)
+    x_test  = _read_gz(os.path.join(data_dir, _MNIST_FILES["test_images"]), 16)
+    y_test  = _read_gz(os.path.join(data_dir, _MNIST_FILES["test_labels"]), 8)
+     
+    if normalize:
+        x_train = (x_train.reshape(-1, 1, 28, 28) / 255.0).astype(np.float32)
+        x_test  = (x_test.reshape(-1, 1, 28, 28) / 255.0).astype(np.float32)
+    else:
+        x_train = x_train.reshape(-1, 28, 28)
+        x_test  = x_test.reshape(-1, 28, 28)
+    return (x_train, y_train), (x_test, y_test)
+
+
+
+
 #влом коменты ставить тут и так все понятно
 class Dataset:
     def __len__(self):

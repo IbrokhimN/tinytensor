@@ -350,6 +350,37 @@ class Tensor:
             out._backward = _backward
         return out
 
+    def abs(self):
+        xp = get_array_module(self.data)
+        out = Tensor(xp.abs(self.data), requires_grad=self.requires_grad, device=self.device)
+        
+        if out.requires_grad:
+            out._prev = {self}
+
+            def _backward():
+                if self.requires_grad:
+                    if self.grad is None:
+                        self.grad = xp.zeros_like(self.data, dtype=np.float32)
+                    self.grad += out.grad * xp.sign(self.data)
+
+            out._backward = _backward
+
+        return out
+
+    def log(self):
+        xp = get_array_module(self.data)
+        out = Tensor(xp.log(self.data), requires_grad=self.requires_grad, device=self.device)
+
+        if out.requires_grad:
+            out._prev = {self}
+            def _backward():
+                if self.requires_grad:
+                    if self.grad is None:
+                        self.grad = xp.zeros_like(self.data, dtype=np.float32)
+                    self.grad += out.grad * (1.0 / self.data)
+            out._backward = _backward
+        return out
+
     def backward(self):
         run_backward(self)
 

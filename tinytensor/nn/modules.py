@@ -72,6 +72,7 @@ class Module:
         from tinytensor.data import TensorDataset, DataLoader
         from tinytensor.core.tensor import Tensor
         from tinytensor.utils import EarlyStopping
+        from tinytensor.utils import train_bar
 
         if not hasattr(self, "_optimizer") or not hasattr(self, "_loss_fn"):
             raise RuntimeError("Сначала вызови model.compile(optimizer, loss)")
@@ -96,7 +97,7 @@ class Module:
         for epoch in range(epochs):
             total, n_batches = 0.0, 0
 
-            for xb, yb in loader:
+            for xb, yb in train_bar(loader, prefix=f"эпоха {epoch+1}/{epochs}"):
                 if not isinstance(xb, Tensor):
                     xb = Tensor(xb)
                 if not isinstance(yb, Tensor):
@@ -324,4 +325,5 @@ class Sequential(Module):
         graph = helper.make_graph(nodes, "model", [inp], [out], initializers)
         model = helper.make_model(graph, opset_imports=[helper.make_opsetid("", 17)])
         onnx.save(model, path)
+
 
