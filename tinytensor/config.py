@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 import numpy as np
 
-# проверяем доступна ли cuda/cupy
+# проверяем доступна ли cuda (cupy)
 try:
     import cupy as cp
     _HAS_CUDA = True
@@ -27,6 +27,9 @@ def set_seed(seed: int):
 
 
 def set_device(device: str):
+    # глобально переключаем устройство по умолчанию.
+    # после этого все новые тензоры и слои создаются на нём,
+    # без ручного .to() на каждом.
     device = str(device).lower()
     if device == "cuda" and not _HAS_CUDA:
         raise RuntimeError("cuda недоступна (cupy не установлен)")
@@ -36,6 +39,7 @@ def set_device(device: str):
 
 
 def get_device():
+    # текущее устройство по умолчанию
     return config.default_device
 
 

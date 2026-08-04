@@ -1,12 +1,9 @@
 import numpy as np
-import tinytensor as tt 
 from tinytensor.data import load_mnist
 from tinytensor.models import ResNet
 from tinytensor.optim import AdamW
 from tinytensor.nn import CrossEntropyLoss
 
-tt.set_device("cuda")
-print(tt.cuda_available())
 # скачивает MNIST
 (x_train, y_train), (x_test, y_test) = load_mnist()
 

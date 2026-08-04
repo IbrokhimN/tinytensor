@@ -1,8 +1,8 @@
 from tinytensor.optim.optimizer import Optimizer, SGD, AdamW
-from tinytensor.optim.lr_scheduler import StepLR
+from tinytensor.optim.lr_scheduler import StepLR, CosineAnnealingLR
 __all__ = [
     "Optimizer", "SGD", "AdamW",
-    "StepLR"
+    "StepLR", "CosineAnnealingLR"
 ]
 
 #эт для удобства

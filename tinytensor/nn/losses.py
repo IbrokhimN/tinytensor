@@ -8,11 +8,12 @@ class MSELoss(Module):
         sq_diff = diff ** 2
         return sq_diff.sum() * (1.0 / y_pred.data.size)
 
-class BCELostt(Module):
+# -log((e-xtar - M)/(sum(exj-M)))=-(xt-M)+log sum(exj-M)
+
+class BCELoss(Module):
     def __init__(self, eps=1e-12):
         super().__init__()
         self.eps = eps
-
     def forward(self, p, y_true):
         # BCE = -среднее[ y·log(p) + (1-y)·log(1-p) ]
         term1 = y_true * p.log()
@@ -20,8 +21,6 @@ class BCELostt(Module):
         res = term1 + term2
         return res.sum() * (-1.0 / p.data.size)
 
-
-# -log((e-xtar - M)/(sum(exj-M)))=-(xt-M)+log sum(exj-M)
 class CrossEntropyLoss(Module):
     def __init__(self, eps=1e-12):
         super().__init__()

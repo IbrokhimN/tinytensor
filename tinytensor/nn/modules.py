@@ -66,13 +66,26 @@ class Module:
         self._loss_fn = loss
         return self
 
+    @staticmethod
+    def _accuracy(pred, target):
+        # доля правильных ответов. pred - логиты [N, classes].
+        # target - либо индексы классов [N], либо one-hot [N, classes].
+        from tinytensor.core.tensor import get_array_module
+        p = pred.data if hasattr(pred, "data") else pred
+        t = target.data if hasattr(target, "data") else target
+        xp = get_array_module(p)
+        pred_idx = xp.argmax(p, axis=1)          # класс с макс. логитом
+        # если target многомерный (one-hot) - тоже берём argmax, иначе это уже индексы
+        if t.ndim > 1:
+            t = xp.argmax(t, axis=1)
+        return float((pred_idx == t).mean())
+
     def fit(self, x, y=None, epochs=1, batch_size=32, shuffle=True,
             verbose=True, validation_data=None, patience=None):
         # обучаем. на вход либо готовый loader, либо сырые x,y
         from tinytensor.data import TensorDataset, DataLoader
         from tinytensor.core.tensor import Tensor
-        from tinytensor.utils import EarlyStopping
-        from tinytensor.utils import train_bar
+        from tinytensor.utils import EarlyStopping, train_bar
 
         if not hasattr(self, "_optimizer") or not hasattr(self, "_loss_fn"):
             raise RuntimeError("Сначала вызови model.compile(optimizer, loss)")
@@ -96,6 +109,7 @@ class Module:
 
         for epoch in range(epochs):
             total, n_batches = 0.0, 0
+            acc_sum = 0.0
 
             for xb, yb in train_bar(loader, prefix=f"эпоха {epoch+1}/{epochs}"):
                 if not isinstance(xb, Tensor):
@@ -112,12 +126,15 @@ class Module:
                 self._optimizer.step()
 
                 total += float(loss.data)
+                acc_sum += self._accuracy(pred, yb)
                 n_batches += 1
 
             avg = total / max(n_batches, 1)
+            acc = acc_sum / max(n_batches, 1)
             history["loss"].append(avg)
+            history.setdefault("acc", []).append(acc)
 
-            line = f"эпоха {epoch+1}/{epochs}  loss={avg:.4f}"
+            line = f"эпоха {epoch+1}/{epochs}  loss={avg:.4f}  acc={acc*100:.2f}%"
             # валидация если дали
             if validation_data is not None:
                 val_loss = self.evaluate(*validation_data, batch_size=batch_size, verbose=False)
@@ -325,5 +342,4 @@ class Sequential(Module):
         graph = helper.make_graph(nodes, "model", [inp], [out], initializers)
         model = helper.make_model(graph, opset_imports=[helper.make_opsetid("", 17)])
         onnx.save(model, path)
-
 

@@ -26,6 +26,8 @@ def _unbroadcast(grad, target):
 # этот мир жесток
 class Tensor:
     def __init__(self, data, requires_grad=False, device=None):
+        # device=None -> берём глобальное устройство по умолчанию из config
+        # (его можно менять через tinytensor.set_device('cuda'))
         if device is None:
             from tinytensor.config import config
             device = config.default_device
@@ -282,6 +284,34 @@ class Tensor:
 
         return out
 
+    def abs(self):
+        xp = get_array_module(self.data)
+        out = Tensor(xp.abs(self.data), requires_grad=self.requires_grad, device=self.device)
+
+        if out.requires_grad:
+            out._prev = {self}
+            def _backward():
+                if self.requires_grad:
+                    if self.grad is None:
+                        self.grad = xp.zeros_like(self.data, dtype=np.float32)
+                    self.grad += out.grad * xp.sign(self.data)
+            out._backward = _backward
+        return out
+
+    def log(self):
+        xp = get_array_module(self.data)
+        out = Tensor(xp.log(self.data), requires_grad=self.requires_grad, device=self.device)
+
+        if out.requires_grad:
+            out._prev = {self}
+            def _backward():
+                if self.requires_grad:
+                    if self.grad is None:
+                        self.grad = xp.zeros_like(self.data, dtype=np.float32)
+                    self.grad += out.grad * (1.0 / self.data)
+            out._backward = _backward
+        return out
+
     def leaky_relu(self, alpha=0.01):
         xp = get_array_module(self.data)
         out_data = xp.where(self.data > 0, self.data, self.data * alpha)
@@ -347,37 +377,6 @@ class Tensor:
                     d_gelu = cdf + x * pdf
                     self.grad += out.grad * d_gelu
 
-            out._backward = _backward
-        return out
-
-    def abs(self):
-        xp = get_array_module(self.data)
-        out = Tensor(xp.abs(self.data), requires_grad=self.requires_grad, device=self.device)
-        
-        if out.requires_grad:
-            out._prev = {self}
-
-            def _backward():
-                if self.requires_grad:
-                    if self.grad is None:
-                        self.grad = xp.zeros_like(self.data, dtype=np.float32)
-                    self.grad += out.grad * xp.sign(self.data)
-
-            out._backward = _backward
-
-        return out
-
-    def log(self):
-        xp = get_array_module(self.data)
-        out = Tensor(xp.log(self.data), requires_grad=self.requires_grad, device=self.device)
-
-        if out.requires_grad:
-            out._prev = {self}
-            def _backward():
-                if self.requires_grad:
-                    if self.grad is None:
-                        self.grad = xp.zeros_like(self.data, dtype=np.float32)
-                    self.grad += out.grad * (1.0 / self.data)
             out._backward = _backward
         return out
 

@@ -10,7 +10,7 @@ from tinytensor.nn.rnn import RNNCell, RNN
 from tinytensor.nn.attention import MultiHeadAttention
 from tinytensor.nn.activations import ReLU, LeReLU, Sigmoid, Tanh, GELU, Softmax
 from tinytensor.nn.dropout import Dropout
-from tinytensor.nn.losses import MSELoss, CrossEntropyLoss
+from tinytensor.nn.losses import MSELoss, CrossEntropyLoss, BCELoss
 from tinytensor.nn.residual import ResidualBlock
 
 __all__ = [
@@ -20,5 +20,5 @@ __all__ = [
     "Flatten", "BatchNorm2d", "LayerNorm",
     "Embedding", "RNNCell", "RNN", "MultiHeadAttention",
     "ReLU", "LeReLU", "Sigmoid", "Tanh", "GELU", "Softmax",
-    "Dropout", "MSELoss", "CrossEntropyLoss","ResidualBlock"
+    "Dropout", "MSELoss", "CrossEntropyLoss", "BCELoss","ResidualBlock"
 ]
