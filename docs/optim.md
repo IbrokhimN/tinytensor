@@ -60,6 +60,35 @@ for epoch in range(100):
 
 Multiplies `optimizer.lr` by `gamma` every `step_size` calls to `.step()`. Call it once per epoch (not per batch) unless you specifically want per-batch decay.
 
+
+## CosineAnnealingLR
+
+Smoothly decays the learning rate following a cosine curve, from the optimizer's
+starting `lr` down to `eta_min` over `T_max` epochs. The decrease is slow at the
+start and end, faster in the middle — a very common schedule for CNNs and
+transformers.
+
+```python
+CosineAnnealingLR(optimizer, T_max, eta_min=0.0)
+```
+
+**Args:**
+
+- `optimizer`: the optimizer to drive.
+- `T_max` (int): number of epochs to reach the minimum.
+- `eta_min` (float): the floor learning rate. Default `0.0`.
+
+Call `step()` once per epoch.
+
+```python
+scheduler = CosineAnnealingLR(optimizer, T_max=50)
+for epoch in range(50):
+    train_one_epoch()
+    scheduler.step()
+```
+
+---
+
 ## clip_grad_norm_
 
 ```python

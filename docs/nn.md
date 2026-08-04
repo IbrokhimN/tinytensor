@@ -177,3 +177,42 @@ CrossEntropyLoss()(logits, targets)     # targets: class indices (int) or one-ho
 
 - `MSELoss` — for regression, or as a crude substitute for classification (works, converges worse than proper cross-entropy on many-class problems).
 - `CrossEntropyLoss` — combined log-softmax + negative log-likelihood, implemented with the standard `(softmax(logits) - one_hot(target)) / batch_size` gradient, numerically stabilized with a max-subtraction before the exponential. `targets` can be given either as integer class indices (shape `(batch,)`) or as a one-hot / soft-label tensor of the same shape as `logits`.
+
+
+### ResidualBlock
+
+The ResNet building block: two 3x3 conv+BN layers with a skip connection that
+adds the input back (`out = relu(F(x) + x)`). When `stride != 1` or the channel
+count changes, a 1x1 downsample conv is applied to the skip path so the shapes
+match.
+
+```python
+ResidualBlock(in_channels, out_channels, stride=1)
+```
+### GlobalAvgPool2d
+
+Averages each channel over its whole spatial map: `[N, C, H, W]` -> `[N, C, 1, 1]`.
+A lightweight replacement for a large `Flatten` + `Linear` at the end of a CNN.
+
+```python
+GlobalAvgPool2d()
+```
+
+### BCELoss
+
+Binary cross-entropy, for binary classification where the model outputs a single
+probability in `[0, 1]`.
+
+```python
+BCELoss(eps=1e-12)
+```
+
+Formula: `-mean[ y*log(p) + (1-y)*log(1-p) ]`.
+
+```python
+loss_fn = BCELoss()
+loss = loss_fn(probs, labels)   # probs in [0,1], labels 0/1
+```
+
+> **Note:** the `eps` argument is not yet wired in, so feeding exactly 0 or 1
+> can produce infinities. Pass probabilities from a sigmoid (never exactly 0/1).
