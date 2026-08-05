@@ -112,8 +112,8 @@ else:
 
 setup(
     name="pytinytensor",
-    version="0.2.52",
-    description="мини ИИ фреймворк от IbrokimN ( github/IbrokhimN )",
+    version="1.0.0",
+    description="ИИ фреймворк от IbrokimN ( github/IbrokhimN )",
     long_description=long_description,
     long_description_content_type="text/markdown",
     author="IbrokhimN",

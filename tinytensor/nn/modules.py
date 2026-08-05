@@ -81,7 +81,7 @@ class Module:
         return float((pred_idx == t).mean())
 
     def fit(self, x, y=None, epochs=1, batch_size=32, shuffle=True,
-            verbose=True, validation_data=None, patience=None):
+            verbose=True, validation_data=None, patience=None, save_best=None):
         # обучаем. на вход либо готовый loader, либо сырые x,y
         from tinytensor.data import TensorDataset, DataLoader
         from tinytensor.core.tensor import Tensor
@@ -98,55 +98,84 @@ class Module:
             loader = DataLoader(dataset, batch_size=batch_size, shuffle=shuffle)
 
         # history чтоб потом график построить
-        history = {"loss": []}
+        from tinytensor.nn.history import History
+        history = History()
+        history["loss"] = []
         if validation_data is not None:
             history["val_loss"] = []
 
         if patience is not None:
             es = EarlyStopping(self, patience=patience)
 
+        # лучшая модель по val_loss
+        best_val = float("inf")
+        best_epoch = -1
+        best_state = None
+
         self.train()
 
-        for epoch in range(epochs):
-            total, n_batches = 0.0, 0
-            acc_sum = 0.0
+        try:
+            for epoch in range(epochs):
+              total, n_batches = 0.0, 0
+              acc_sum = 0.0
 
-            for xb, yb in train_bar(loader, prefix=f"эпоха {epoch+1}/{epochs}"):
-                if not isinstance(xb, Tensor):
-                    xb = Tensor(xb)
-                if not isinstance(yb, Tensor):
-                    yb = Tensor(yb)
+              for xb, yb in train_bar(loader, prefix=f"эпоха {epoch+1}/{epochs}"):
+                  if not isinstance(xb, Tensor):
+                      xb = Tensor(xb)
+                  if not isinstance(yb, Tensor):
+                      yb = Tensor(yb)
 
-                # обычный цикл, просто спрятан внутрь
-                pred = self(xb)
-                loss = self._loss_fn(pred, yb)
+                  # обычный цикл, просто спрятан внутрь
+                  pred = self(xb)
+                  loss = self._loss_fn(pred, yb)
 
-                self._optimizer.zero_grad()
-                loss.backward()
-                self._optimizer.step()
+                  self._optimizer.zero_grad()
+                  loss.backward()
+                  self._optimizer.step()
 
-                total += float(loss.data)
-                acc_sum += self._accuracy(pred, yb)
-                n_batches += 1
+                  total += float(loss.data)
+                  acc_sum += self._accuracy(pred, yb)
+                  n_batches += 1
 
-            avg = total / max(n_batches, 1)
-            acc = acc_sum / max(n_batches, 1)
-            history["loss"].append(avg)
-            history.setdefault("acc", []).append(acc)
+              avg = total / max(n_batches, 1)
+              acc = acc_sum / max(n_batches, 1)
+              history["loss"].append(avg)
+              history.setdefault("acc", []).append(acc)
 
-            line = f"эпоха {epoch+1}/{epochs}  loss={avg:.4f}  acc={acc*100:.2f}%"
-            # валидация если дали
-            if validation_data is not None:
-                val_loss = self.evaluate(*validation_data, batch_size=batch_size, verbose=False)
-                history["val_loss"].append(val_loss)
-                line += f"  val_loss={val_loss:.4f}"
-                if patience is not None:
-                    if es(val_loss):
-                        print("ранняя остановка")
-                        break
+              line = f"эпоха {epoch+1}/{epochs}  loss={avg:.4f}  acc={acc*100:.2f}%"
+              # валидация если дали
+              if validation_data is not None:
+                  val_loss = self.evaluate(*validation_data, batch_size=batch_size, verbose=False)
+                  history["val_loss"].append(val_loss)
+                  line += f"  val_loss={val_loss:.4f}"
 
-            if verbose:
-                print(line)
+                  # автосохранение лучшей модели
+                  if save_best is not None and val_loss < best_val:
+                      best_val = val_loss
+                      best_epoch = epoch + 1
+                      # copy, т.к. state_dict хранит ссылки
+                      best_state = {k: v.copy() for k, v in self.state_dict().items()}
+                      # пишем сразу, чтобы прерывание не потеряло чекпоинт
+                      import pickle
+                      with open(save_best, "wb") as f:
+                          pickle.dump(best_state, f)
+                      line += " [best*]"
+
+                  if patience is not None:
+                      if es(val_loss):
+                          print("ранняя остановка")
+                          break
+
+              if verbose:
+                  print(line)
+        except KeyboardInterrupt:
+            # прервали руками, чекпоинт уже на диске
+            print("\nобучение прервано, лучшая модель на диске (если была валидация)")
+
+        # возвращаем лучшие веса в модель (файл уже записан)
+        if save_best is not None and best_state is not None:
+            self.load_state_dict(best_state)
+            print(f"лучшая модель (эпоха {best_epoch}, val_loss={best_val:.4f}) сохранена: {save_best}")
 
         return history
 
@@ -177,6 +206,53 @@ class Module:
         if verbose:
             print(f"evaluate  loss={avg:.4f}")
         return avg
+
+    def predict_proba(self, x, batch_size=32):
+        # вероятности по классам, форма (N, n_classes)
+        from tinytensor.data import TensorDataset, DataLoader
+        from tinytensor.core.tensor import Tensor, get_array_module
+
+        self.eval()
+
+        # устройство модели из первого параметра
+        params = self.parameters()
+        model_device = params[0].device if params else "cpu"
+
+        # y не нужен -> заглушка нулями
+        n = len(x)
+        dummy_y = np.zeros(n)
+        dataset = TensorDataset(x, dummy_y)
+        # shuffle=False, иначе порядок ответов разъедется
+        loader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
+
+        probs_batches = []
+
+        for xb, _ in loader:
+            if not isinstance(xb, Tensor):
+                xb = Tensor(xb)
+            # батч на устройство весов, иначе cpu/gpu конфликт
+            xb = xb.to(model_device)
+
+            logits = self(xb)
+            data = logits.data
+            xp = get_array_module(data)
+
+            # softmax со сдвигом на max для стабильности
+            shifted = data - xp.max(data, axis=1, keepdims=True)
+            exp = xp.exp(shifted)
+            probs = exp / xp.sum(exp, axis=1, keepdims=True)
+
+            # на cpu-numpy чтобы склеить единообразно
+            if xp is not np:
+                probs = xp.asnumpy(probs)
+            probs_batches.append(probs)
+
+        return np.concatenate(probs_batches, axis=0)
+
+    def predict(self, x, batch_size=32):
+        # класс на объект, форма (N,)
+        probs = self.predict_proba(x, batch_size=batch_size)
+        return np.argmax(probs, axis=1)
 
     def train(self, mode=True):
         self.training = mode
@@ -342,4 +418,42 @@ class Sequential(Module):
         graph = helper.make_graph(nodes, "model", [inp], [out], initializers)
         model = helper.make_model(graph, opset_imports=[helper.make_opsetid("", 17)])
         onnx.save(model, path)
+
+    @staticmethod
+    def from_onnx(path):
+        # зеркало to_onnx: Gemm -> Linear, Relu -> ReLU
+        import onnx
+        from onnx import numpy_helper
+        from tinytensor.nn.linear import Linear
+        from tinytensor.nn.activations import ReLU
+        from tinytensor.core.tensor import Tensor
+
+        model = onnx.load(path)
+        graph = model.graph
+
+        # initializers -> словарь имя: массив весов
+        weights = {}
+        for init in graph.initializer:
+            weights[init.name] = numpy_helper.to_array(init)
+
+        layers = []
+        for node in graph.node:
+            if node.op_type == "Gemm":
+                # node.input = [вход, "Wi", "Bi"]
+                w = weights[node.input[1]]     # форма (in, out)
+                b = weights[node.input[2]]     # форма (1, out)
+
+                in_f, out_f = w.shape
+                lin = Linear(in_f, out_f)
+                # веса кладём как есть, to_onnx не транспонировал
+                lin.weight = Tensor(w.astype(np.float32), requires_grad=True, device=lin.device)
+                lin.bias = Tensor(b.astype(np.float32), requires_grad=True, device=lin.device)
+                layers.append(lin)
+
+            elif node.op_type == "Relu":
+                layers.append(ReLU())
+
+            # прочие узлы пока пропускаем (Conv/Sigmoid - добавить ветки тут)
+
+        return Sequential(*layers)
 

@@ -32,6 +32,8 @@ class Conv2d(Module):
         self.bias = Tensor(b_data, requires_grad=True)
         
     def forward(self, x):
+        if getattr(self, "quantized", False):
+            return self._forward_quant(x)
         N, C, H, W = x.data.shape
         
         x_col, out_h, out_w = im2col_indices(
@@ -83,3 +85,50 @@ class Conv2d(Module):
             out._backward = _backward
 
         return out
+
+    # ---------- int8 квантизация ----------
+
+    def quant(self):
+        # квант весов один раз, per-channel по выходным каналам
+        from tinytensor.nn.linear import Linear
+        w_row = np.asarray(self.weight.data, dtype=np.float32).reshape(self.out_channels, -1)
+        self.w_q, self.w_scale = Linear._quant_symmetric(w_row, axis=1)
+        self.b_data = None if self.bias is None else np.asarray(self.bias.data, dtype=np.float32)
+        self.weight = None
+        self.bias = None
+        self.quantized = True
+        return self
+
+    def _forward_quant(self, x):
+        from tinytensor.nn.linear import Linear
+        N = x.data.shape[0]
+        x_col, out_h, out_w = im2col_indices(
+            np.asarray(x.data, dtype=np.float32), self.kh, self.kw,
+            padding=self.padding, stride=self.stride
+        )
+        # вход квантуем на лету
+        x_q, sx = Linear._quant_symmetric(x_col, axis=None)
+        # int8 @ int8 -> int32
+        acc = self.w_q.astype(np.int32) @ x_q.astype(np.int32)
+        # w_scale per-channel -> нужен столбец
+        y = acc.astype(np.float32) * sx * self.w_scale.reshape(-1, 1)
+        if self.b_data is not None:
+            y = y + self.b_data
+        y = y.reshape(self.out_channels, out_h, out_w, N).transpose(3, 0, 1, 2)
+        return Tensor(y, requires_grad=False, device="cpu")
+
+    def _quant_buffers(self):
+        b = {"w_q": self.w_q, "w_scale": self.w_scale}
+        if self.b_data is not None:
+            b["b_data"] = self.b_data
+        return b
+
+    def _set_quant_buffers(self, sdict, prefix):
+        p = (prefix + ".") if prefix else ""
+        if (p + "w_q") in sdict:
+            self.w_q = sdict[p + "w_q"]
+            self.w_scale = sdict[p + "w_scale"]
+            self.b_data = sdict.get(p + "b_data", None)
+            self.weight = None
+            self.bias = None
+            self.quantized = True
