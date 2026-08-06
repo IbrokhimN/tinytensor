@@ -149,6 +149,17 @@ class Module:
                   history["val_loss"].append(val_loss)
                   line += f"  val_loss={val_loss:.4f}"
 
+                  # честная val accuracy на валидации (не train)
+                  x_val, y_val = validation_data
+                  val_preds = self.predict(x_val, batch_size=batch_size)
+                  y_val_np = y_val.data if hasattr(y_val, "data") else np.asarray(y_val)
+                  if y_val_np.ndim > 1:
+                      y_val_np = np.argmax(y_val_np, axis=1)
+                  val_acc = float((val_preds == y_val_np).mean())
+                  history.setdefault("val_acc", []).append(val_acc)
+                  line += f"  val_acc={val_acc*100:.2f}%"
+                  self.train()   # predict/evaluate перевели в eval, вернём train
+
                   # автосохранение лучшей модели
                   if save_best is not None and val_loss < best_val:
                       best_val = val_loss

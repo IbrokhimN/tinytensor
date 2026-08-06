@@ -1,12 +1,7 @@
-# аугментации - случайные искажения картинок при обучении,
-# чтоб модель училась сути, а не зубрила пиксели.
-# работают с сырыми numpy-массивами [N, C, H, W], без автограда.
-# применять ТОЛЬКО на train, не на test.
 import numpy as np
 
 
 def random_flip(x, p=0.5):
-    # горизонтальный флип (зеркало) с вероятностью p на каждую картинку
     out = x.copy()
     for i in range(len(x)):
         if np.random.rand() < p:
@@ -15,8 +10,6 @@ def random_flip(x, p=0.5):
 
 
 def random_crop(x, padding=4):
-    # случайный сдвиг: добавляем рамку нулей вокруг, вырезаем кусок
-    # исходного размера в случайном месте. будто картинку чуть подвинули.
     N, C, H, W = x.shape
     # паддинг только по H и W, каналы и батч не трогаем
     padded = np.pad(x, ((0,0),(0,0),(padding,padding),(padding,padding)), mode='constant')
@@ -30,8 +23,6 @@ def random_crop(x, padding=4):
 
 
 def random_rotate90(x, p=0.5):
-    # поворот на 90 градусов (случайно 1-3 раза) с вероятностью p.
-    # работает только для квадратных картинок (H == W).
     out = x.copy()
     for i in range(len(x)):
         if np.random.rand() < p:
@@ -56,7 +47,6 @@ def random_brightness(x, delta=0.2):
 
 
 class Compose:
-    # склеивает несколько аугментаций в одну: применяет по очереди.
     # использование:
     #   aug = Compose([random_flip, random_crop])
     #   x_aug = aug(x_batch)

@@ -26,8 +26,6 @@ def _unbroadcast(grad, target):
 # этот мир жесток
 class Tensor:
     def __init__(self, data, requires_grad=False, device=None):
-        # device=None -> берём глобальное устройство по умолчанию из config
-        # (его можно менять через tinytensor.set_device('cuda'))
         if device is None:
             from tinytensor.config import config
             device = config.default_device
@@ -57,7 +55,6 @@ class Tensor:
         self._prev = set()
 
     def to(self, device):
-        # перекидываем тензор на cuda или cpu
         device = str(device).lower()
         if device == self.device:
             return self
