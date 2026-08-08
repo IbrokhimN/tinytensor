@@ -61,7 +61,6 @@ import csv as _csv
 #загрузчик табличных данных из csv
 def load_csv(path, target=-1, has_header=True, delimiter=",",
              normalize=False, test_split=None, shuffle=True, seed=None):
-    # грузим табличный csv -> (x, y) или train/test сплит
     with open(path, "r", newline="") as f:
         reader = _csv.reader(f, delimiter=delimiter)
         rows = list(reader)

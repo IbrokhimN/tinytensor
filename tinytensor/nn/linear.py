@@ -33,7 +33,6 @@ class Linear(Module):
             out = out + self.bias
         return out
 
-    # ---------- structured pruning ----------
 
     def _prune_outputs(self, idx):
         # режем выходные нейроны (столбцы) текущего слоя
@@ -49,7 +48,6 @@ class Linear(Module):
         self.weight = Tensor(new_w, requires_grad=True, device=self.device)
         self.in_features = self.in_features - len(idx)
 
-    # ---------- int8 квантизация ----------
 
     @staticmethod
     def _quant_symmetric(arr, axis=None):

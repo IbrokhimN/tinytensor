@@ -20,13 +20,17 @@ def _vgg_block(in_ch, out_ch, num_convs):
 
 class VGG(Module):
     def __init__(self, num_classes=10, in_channels=3, small_input=True):
+        # small_input=True для мелких картинок 32x32 (CIFAR): 3 блока.
+        # рассчитано на 32x32 вход.
         super().__init__()
 
         layers = []
+        # 3 блока: каналы 64 -> 128 -> 256, картинка 32 -> 16 -> 8 -> 4
         layers += _vgg_block(in_channels, 64, num_convs=2)   # 32 -> 16
         layers += _vgg_block(64, 128, num_convs=2)           # 16 -> 8
         layers += _vgg_block(128, 256, num_convs=3)          # 8 -> 4
 
+        # классификатор
         layers.append(Flatten())                             # 256*4*4 = 4096
         layers.append(Linear(256 * 4 * 4, 512))
         layers.append(ReLU())

@@ -46,4 +46,6 @@ def summary(model: Module, input_shape: tuple):
     print(f"Total params: {total_params:,}")
     print(f"Trainable params: {trainable_params:,}")
     print(f"Non-trainable params: {total_params - trainable_params:,}")
+    # размер модели во float32 (4 байта на параметр)
+    print(f"Size (float32): {total_params * 4 / (1024 ** 2):.3f} MB")
     print("=" * 50 + "\n")

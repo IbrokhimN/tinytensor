@@ -68,36 +68,33 @@ class Module:
 
     @staticmethod
     def _accuracy(pred, target):
-        # доля правильных ответов. pred - логиты [N, classes].
-        # target - либо индексы классов [N], либо one-hot [N, classes].
         from tinytensor.core.tensor import get_array_module
         p = pred.data if hasattr(pred, "data") else pred
         t = target.data if hasattr(target, "data") else target
         xp = get_array_module(p)
         pred_idx = xp.argmax(p, axis=1)          # класс с макс. логитом
-        # если target многомерный (one-hot) - тоже берём argmax, иначе это уже индексы
         if t.ndim > 1:
             t = xp.argmax(t, axis=1)
         return float((pred_idx == t).mean())
 
     def fit(self, x, y=None, epochs=1, batch_size=32, shuffle=True,
-            verbose=True, validation_data=None, patience=None, save_best=None):
-        # обучаем. на вход либо готовый loader, либо сырые x,y
+            verbose=True, validation_data=None, patience=None, save_best=None,
+            callbacks=None):
         from tinytensor.data import TensorDataset, DataLoader
         from tinytensor.core.tensor import Tensor
         from tinytensor.utils import EarlyStopping, train_bar
 
+        callbacks = callbacks or []
+
         if not hasattr(self, "_optimizer") or not hasattr(self, "_loss_fn"):
             raise RuntimeError("Сначала вызови model.compile(optimizer, loss)")
 
-        # если дали loader берем как есть, иначе собираем сами
         if hasattr(x, "__iter__") and y is None and not isinstance(x, (np.ndarray,)):
             loader = x
         else:
             dataset = TensorDataset(x, y)
             loader = DataLoader(dataset, batch_size=batch_size, shuffle=shuffle)
 
-        # history чтоб потом график построить
         from tinytensor.nn.history import History
         history = History()
         history["loss"] = []
@@ -107,12 +104,15 @@ class Module:
         if patience is not None:
             es = EarlyStopping(self, patience=patience)
 
-        # лучшая модель по val_loss
         best_val = float("inf")
         best_epoch = -1
         best_state = None
 
         self.train()
+
+        # колбэкам даём стартовать
+        for cb in callbacks:
+            cb.on_train_begin(self)
 
         try:
             for epoch in range(epochs):
@@ -179,6 +179,19 @@ class Module:
 
               if verbose:
                   print(line)
+
+              # колбэки в конце эпохи. собираем метрики эпохи в logs
+              if callbacks:
+                  logs = {"loss": avg, "acc": acc}
+                  if validation_data is not None:
+                      logs["val_loss"] = history["val_loss"][-1]
+                      logs["val_acc"] = history["val_acc"][-1]
+                  stop = False
+                  for cb in callbacks:
+                      if cb.on_epoch_end(epoch, logs, self):
+                          stop = True
+                  if stop:
+                      break
         except KeyboardInterrupt:
             # прервали руками, чекпоинт уже на диске
             print("\nобучение прервано, лучшая модель на диске (если была валидация)")
@@ -187,6 +200,10 @@ class Module:
         if save_best is not None and best_state is not None:
             self.load_state_dict(best_state)
             print(f"лучшая модель (эпоха {best_epoch}, val_loss={best_val:.4f}) сохранена: {save_best}")
+
+        # колбэкам даём завершиться (закрыть файлы и т.п.)
+        for cb in callbacks:
+            cb.on_train_end(self)
 
         return history
 
@@ -229,7 +246,6 @@ class Module:
         params = self.parameters()
         model_device = params[0].device if params else "cpu"
 
-        # y не нужен -> заглушка нулями
         n = len(x)
         dummy_y = np.zeros(n)
         dataset = TensorDataset(x, dummy_y)
@@ -432,7 +448,6 @@ class Sequential(Module):
 
     @staticmethod
     def from_onnx(path):
-        # зеркало to_onnx: Gemm -> Linear, Relu -> ReLU
         import onnx
         from onnx import numpy_helper
         from tinytensor.nn.linear import Linear
@@ -442,7 +457,6 @@ class Sequential(Module):
         model = onnx.load(path)
         graph = model.graph
 
-        # initializers -> словарь имя: массив весов
         weights = {}
         for init in graph.initializer:
             weights[init.name] = numpy_helper.to_array(init)
@@ -450,13 +464,11 @@ class Sequential(Module):
         layers = []
         for node in graph.node:
             if node.op_type == "Gemm":
-                # node.input = [вход, "Wi", "Bi"]
                 w = weights[node.input[1]]     # форма (in, out)
                 b = weights[node.input[2]]     # форма (1, out)
 
                 in_f, out_f = w.shape
                 lin = Linear(in_f, out_f)
-                # веса кладём как есть, to_onnx не транспонировал
                 lin.weight = Tensor(w.astype(np.float32), requires_grad=True, device=lin.device)
                 lin.bias = Tensor(b.astype(np.float32), requires_grad=True, device=lin.device)
                 layers.append(lin)

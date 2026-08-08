@@ -3,26 +3,30 @@ import numpy as np
 
 class Ensemble:
     def __init__(self, models, voting_type="soft"):
+        # models - список моделей (любой Module)
         if voting_type not in ("soft", "hard"):
             raise ValueError("voting_type должен быть 'soft' или 'hard'")
         self.models = list(models)
         self.voting_type = voting_type
 
     def compile(self, optimizer, loss):
+        # компилируем все модели одинаково
         for m in self.models:
             m.compile(optimizer, loss)
         return self
 
     def fit(self, x, y=None, **kwargs):
+        # обучаем по очереди: сначала модель 1, потом 2, и тд
         histories = []
         for i, m in enumerate(self.models):
             print(f"=== обучение модели {i+1}/{len(self.models)} ({type(m).__name__}) ===")
             h = m.fit(x, y, **kwargs)
             histories.append(h)
-        self.histories = histories   # запоминаем для plot
+        self.histories = histories   # для plot
         return histories
 
     def predict_proba(self, x, batch_size=32):
+        # усреднённые вероятности по всем моделям
         total = None
         for m in self.models:
             probs = m.predict_proba(x, batch_size=batch_size)
@@ -30,13 +34,17 @@ class Ensemble:
         return total / len(self.models)
 
     def predict(self, x, batch_size=32):
+        # предсказанный класс на объект
         if self.voting_type == "soft":
+            # суммируем вероятности всех моделей берём argmax суммы
             return np.argmax(self.predict_proba(x, batch_size=batch_size), axis=1)
         else:
+            # hard: каждая модель даёт свой класс берём самый частый мода
             votes = []
             for m in self.models:
                 votes.append(m.predict(x, batch_size=batch_size))
-            votes = np.stack(votes, axis=0)   # (n_models, N)
+            votes = np.stack(votes, axis=0)   # n_models, N
+            # для каждого объекта считаем какой класс встретился чаще всего
             n = votes.shape[1]
             out = np.empty(n, dtype=votes.dtype)
             for j in range(n):
@@ -45,10 +53,12 @@ class Ensemble:
             return out
 
     def evaluate(self, x, y, batch_size=32):
+        # доля правильных ответов ансамбля на тесте
         preds = self.predict(x, batch_size=batch_size)
         return float((preds == y).mean())
 
     def _model_accuracy(self, model, x, y, batch_size=32):
+        # тестовая точность одной модели
         preds = model.predict(x, batch_size=batch_size)
         return float((preds == y).mean())
 
@@ -140,11 +150,13 @@ class Ensemble:
 
         plt.figure(figsize=(8, 5))
 
+        # линия val_acc на каждую модель
         for m, h in zip(self.models, self.histories):
             accs = [a * 100 for a in h["val_acc"]]
             epochs = range(1, len(accs) + 1)
             plt.plot(epochs, accs, marker="o", label=f"{type(m).__name__} (val)")
 
+        # честная точность ансамбля на тесте - одно число, рисуем линией
         ens_acc = self.evaluate(x_test, y_test, batch_size=batch_size) * 100
         plt.axhline(ens_acc, color="red", linestyle="--", linewidth=2,
                     label=f"Ансамбль ({self.voting_type}): {ens_acc:.2f}%")

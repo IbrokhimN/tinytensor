@@ -22,3 +22,7 @@ __all__ = [
     "ReLU", "LeReLU", "Sigmoid", "Tanh", "GELU", "Softmax",
     "Dropout", "MSELoss", "CrossEntropyLoss", "BCELoss","ResidualBlock"
 ]
+
+from tinytensor.nn.callbacks import (Callback, EarlyStop, ModelCheckpoint,
+                                     LRScheduler, CSVLogger)
+__all__ += ["Callback", "EarlyStop", "ModelCheckpoint", "LRScheduler", "CSVLogger"]

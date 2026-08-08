@@ -1,3 +1,6 @@
+# готовые ResNet-архитектуры, собранные из кирпичей tinytensor.nn
+# Каждая новая стадия удваивает число каналов и вдвое уменьшает картинку.
+
 import numpy as np
 from tinytensor.nn.modules import Module, Sequential
 from tinytensor.nn.conv import Conv2d
@@ -19,6 +22,13 @@ def _make_stage(in_channels, out_channels, num_blocks, stride):
 
 class ResNet(Module):
     def __init__(self, num_classes=10, in_channels=3, blocks_per_stage=(2, 2, 2, 2), small_input=True):
+        # num_classes сколько классов на выходе
+        # in_channels каналов во входной картинке (3 для RGB, 1 для MNIST)
+        # blocks_per_stage сколько блоков в каждой из 4 стадий.
+        #(2,2,2,2) = ResNet-18, (3,4,6,3) = ResNet-34
+        # small_input True для мелких картинок типо сифара
+        #лёгкий стем 3x3 без агрессивного уменьшения.
+        # False классический стем 7x7 + maxpool
         super().__init__()
 
         layers = []
