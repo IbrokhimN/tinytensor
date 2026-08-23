@@ -1,0 +1,24 @@
+# Cargo.toml - описание rust-пакета и его зависимостей
+
+[package]
+name = "tinytensor_rust"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "tinytensor_rust"
+crate-type = ["cdylib"]
+
+[dependencies]
+# pyo3 0.23 - поддерживает python 3.13.
+pyo3 = { version = "0.23", features = ["extension-module"] }
+# numpy-крейт (несёт свой ndarray).
+numpy = "0.23"
+# rayon - параллелизм на все ядра процессора.
+rayon = "1.10"
+
+[profile.release]
+opt-level = 3
+lto = true
+# codegen-units=1 даёт компилятору больше свободы для оптимизации (чуть дольше сборка).
+codegen-units = 1

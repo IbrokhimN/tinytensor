@@ -1,220 +1,246 @@
 # tinytensor
 
-Новые доки напишу в след версии 
+A small, dependency-light autograd engine and neural network toolkit built on
+top of NumPy, with an optional CUDA backend via CuPy for real GPU-resident
+tensors. It implements reverse-mode automatic differentiation (the same core
+idea as [micrograd](https://github.com/karpathy/micrograd)), a standard set of
+layers, optimizers, a data pipeline, ready-made model architectures, and basic
+deployment tooling (quantization, pruning, ONNX export).
 
-Маленький самописный autograd на numpy. Тензоры, backprop, пара слоев,
-лоссы, оптимизаторы и даталоадер. По сути свой мини-pytorch, только без
-плюшек и без cuda (пока).
+It is **not** a PyTorch replacement in performance or ecosystem. It exists to be
+small enough to read end to end in an evening, while still being capable enough
+to train real convolutional models on real data (MNIST, Fashion-MNIST) on both
+CPU and GPU.
 
-Никакой производительности тут не ищите, тут просто видно как все
-устроено внутри, без магии.
+## Contents
 
-## Содержание
+- [Installation](#installation)
+- [Quickstart](#quickstart)
+- [Training on the GPU](#training-on-the-gpu)
+- [What's implemented](#whats-implemented)
+- [Documentation](#documentation)
+- [Project layout](#project-layout)
+- [Known limitations](#known-limitations)
+- [Roadmap](#roadmap)
+- [References](#references)
 
-- [Установка](#установка)
-- [Документация](#документация)
-- [Быстрый старт](#быстрый-старт)
-- [Как работает autograd](#как-работает-autograd)
-- [API](#api)
-- [Примеры](#примеры)
-- [Тесты](#тесты)
-- [Структура](#структура)
-- [Чего нет](#чего-нет)
-- [Ссылки](#ссылки)
+## Installation
 
-## Установка
+```bash
+pip install pytinytensor
+```
+
+From source:
 
 ```bash
 git clone https://github.com/IbrokhimN/tinytensor
 cd tinytensor
-pip install -e .          # обычная установка
-pip install -e .[dev]     # плюс pytest, если хотите гонять тесты
+pip install -e .          # base install
+pip install -e .[dev]     # + pytest for the test suite
 ```
 
-Или руками:
+The only hard dependency is `numpy`. For GPU support, install `cupy` matching
+your CUDA version, for example:
 
 ```bash
-pip install -r requirements.txt
+pip install cupy-cuda12x   # CUDA 12.x
+pip install cupy-cuda13x   # CUDA 13.x
 ```
 
-Зависимость одна - numpy.
+If `cupy` is not installed, everything falls back to a pure-NumPy CPU path — the
+install never fails because of a missing CUDA toolchain. See
+[docs/cuda.md](docs/cuda.md).
 
-## Документация
+## Quickstart
 
-Все подробности разложены по [`docs/`](docs/), README тут больше как входная дверь:
-
-- [docs/getting_started.md](docs/getting_started.md) - установка, quickstart
-- [docs/tensor_and_autograd.md](docs/tensor_and_autograd.md) - как устроен Tensor и backward
-- [docs/nn.md](docs/nn.md) - Module, Linear, активации, Dropout, MSELoss
-- [docs/optim.md](docs/optim.md) - SGD, AdamW
-- [docs/data.md](docs/data.md) - Dataset, DataLoader
-- [docs/utils.md](docs/utils.md) - progress_bar, EarlyStopping
-- [docs/model_saving.md](docs/model_saving.md) - save/load модели
-- [docs/cuda.md](docs/cuda.md) - опциональный cuda-бэкенд
-- [docs/faq.md](docs/faq.md) - грабли, на которые уже наступили
-
-## Быстрый старт
+Train a small CNN on real MNIST digits in a few lines:
 
 ```python
-from tinytensor.core.tensor import Tensor
-from tinytensor.nn.linear import Linear
-from tinytensor.nn.losses import MSELoss
-from tinytensor.optim import SGD
+from tinytensor.data import load_mnist
+from tinytensor.models import LeNet
+from tinytensor.optim import AdamW
+from tinytensor.nn import CrossEntropyLoss
 
-model = Linear(in_features=1, out_features=1)
-loss_fn = MSELoss()
-optimizer = SGD(model.parameters(), lr=0.01)
+# load_mnist downloads, caches, normalizes, and adds the channel dim -> [N,1,28,28]
+(x_train, y_train), (x_test, y_test) = load_mnist()
 
-x = Tensor([[1.0], [2.0], [3.0]])
-y = Tensor([[3.0], [5.0], [7.0]])   # y = 2x + 1
-
-for epoch in range(100):
-    optimizer.zero_grad()
-    pred = model(x)
-    loss = loss_fn(pred, y)
-    loss.backward()
-    optimizer.step()
-
-print(model.weight.data, model.bias.data)  # ~2.0, ~1.0
+model = LeNet(num_classes=10, in_channels=1)
+model.compile(lambda p: AdamW(p, lr=1e-3), CrossEntropyLoss())
+model.fit(
+    x_train, y_train,
+    epochs=5,
+    batch_size=64,
+    validation_data=(x_test, y_test),
+)
 ```
 
-Рабочие примеры целиком лежат в [`examples/`](examples/).
+`fit` prints a progress bar, per-epoch loss, training accuracy, and validation
+loss, and returns a `history` dict.
 
-## Как работает autograd
+## Training on the GPU
 
-У каждого `Tensor` есть:
+There is a single global switch. Call it once at the top of your script and
+every new tensor, layer, and model is created on the GPU automatically — no
+manual `.to("cuda")` on each object:
 
-- `data` - сами значения (numpy-массив, всегда float32);
-- `grad` - градиент, пока не посчитан - None;
-- `_prev` - от каких тензоров он произошел (родители в графе);
-- `_backward` - функция которая знает как раскидать градиент на родителей.
+```python
+import tinytensor as tt
+tt.set_device("cuda")   # everything below is created on the GPU
 
-Когда считаете `z = f(x, y)`, по цепному правилу:
-
-```
-dL/dx = dL/dz * dz/dx
-dL/dy = dL/dz * dz/dy
+# ... exact same training code as above ...
 ```
 
-`backward()` строит топологический порядок графа (`tinytensor/core/autograd.py`),
-ставит корню градиент = 1 и идет в обратном порядке, вызывая `_backward()`
-у каждого узла. Ровно так же устроен micrograd Карпатова, только у него
-даже покомпактнее:
+Device flows through the graph: each layer creates its output on the same device
+as its input, so you set the device once and it propagates. `.to("cpu")` /
+`.to("cuda")` still exist for moving individual tensors by hand when you want to.
 
-- [Karpathy - micrograd](https://github.com/karpathy/micrograd) - реализация того же самого на ~100 строк, must see
-- [CS231n: Backpropagation, Intuitions](https://cs231n.github.io/optimization-2/) - если нужно разложить backprop по полочкам
-- [colah - Calculus on Computational Graphs](https://colah.github.io/posts/2015-08-Backprop/)
+`tt.cuda_available()` returns whether CuPy was found. Verified working on an
+RTX 2080 (CUDA 13.3, `cupy-cuda13x`) training ResNet on MNIST end to end.
 
-Если совсем в тему - есть видос Карпатова где он с нуля пишет micrograd и
-объясняет каждую строчку: ["The spelled-out intro to neural networks and backpropagation"](https://www.youtube.com/watch?v=VMj-3S1tku0).
-Собственно тут все то же самое, только на numpy и чуть пошире.
+## What's implemented
 
-### Формулы, которые реализованы в Tensor
+### Core
 
-| операция | вперед | производная |
-|---|---|---|
-| `a + b` | `a + b` | `dL/da += dL/dz`, `dL/db += dL/dz` (плюс схлопывание по broadcast-осям) |
-| `a * b` | `a * b` | `dL/da += dL/dz * b`, `dL/db += dL/dz * a` |
-| `a @ b` | matmul | `dL/da += dL/dz @ bᵀ`, `dL/db += aᵀ @ dL/dz` |
-| `a ** p` | `aᵖ` | `dL/da += dL/dz * p * a^(p-1)` |
-| ReLU | `max(0, x)` | 1 при x>0, иначе 0 |
-| LeakyReLU | x или αx | 1 при x>0, иначе α |
-| sigmoid | `1/(1+e⁻ˣ)` | `σ(x)*(1-σ(x))` |
-| tanh | `tanh(x)` | `1 - tanh²(x)` |
-| GELU | `0.5x(1+tanh(√(2/π)(x+0.044715x³)))` | см. [статью по GELU](https://arxiv.org/abs/1606.08415), формула там не самая короткая |
+- `Tensor` with reverse-mode autograd: `+ - * @ **`, `.sum()`, `.reshape()`,
+  `.transpose()`, `.abs()`, `.log()`, broadcasting-aware gradients, correct
+  gradients through batched (4D+) matmul.
+- Per-tensor backend resolution via `get_array_module()` — every op dispatches
+  to `numpy` or `cupy` based on where the data lives, so gradients stay on the
+  correct device throughout a step.
+- Activations with gradients: `relu`, `leaky_relu`, `sigmoid`, `tanh`, `gelu`.
 
-Про broadcasting и почему градиент иногда надо досуммировать обратно
-(`_unbroadcast`) норм объясняют [правила broadcasting в numpy](https://numpy.org/doc/stable/user/basics.broadcasting.html).
+### Layers (`tinytensor.nn`)
 
-## API
+- `Linear`, `Sequential`.
+- `Conv2d`, `MaxPool2d`, `AvgPool2d`, `GlobalAvgPool2d`, `Flatten`,
+  `BatchNorm2d` — full backward via cached im2col/col2im, gradient-checked.
+- `ResidualBlock` — the ResNet building block, with automatic 1x1 downsample
+  when shapes change.
+- `LayerNorm`, `MultiHeadAttention` (with causal masking), `Embedding`,
+  `RNNCell`, `RNN` (full BPTT).
+- Activations: `ReLU`, `LeReLU`, `Sigmoid`, `Tanh`, `GELU`, `Softmax`.
+- `Dropout` — inverted dropout, gated by `train()`/`eval()`.
+- Losses: `MSELoss`, `CrossEntropyLoss`, `BCELoss`.
 
-### Tensor
+### Model architectures (`tinytensor.models`)
 
-`tinytensor.core.tensor.Tensor` - главный класс. Есть `+ - * @ **`, `.sum()`,
-активации `relu / leaky_relu / sigmoid / tanh / gelu`, ну и `.backward()`.
+- `LeNet` — classic CNN for 28x28 inputs (~62k params).
+- `VGG` — VGG-style blocks for 32x32 inputs (~3.8M params).
+- `ResNet`, `ResNet18`, `ResNet34` — residual networks with a `small_input`
+  mode for CIFAR/MNIST-sized images (ResNet18 ~11.2M params).
 
-### nn
+### Data (`tinytensor.data`)
 
-- `Module` - от него наследуются все слои, `forward / parameters() / zero_grad()`, по духу как [`torch.nn.Module`](https://pytorch.org/docs/stable/generated/torch.nn.Module.html);
-- `Linear(in_features, out_features)` - обычный `y = xW + b`, веса инициализируются по [He/Kaiming init](https://arxiv.org/abs/1502.01852) (`std = sqrt(2/in_features)`);
-- `ReLU, LeReLU, Sigmod, Tanh, GELU` - тонкие обертки над методами Tensor;
-- `MSELoss` - `mean((pred - target)^2)`, банальщина.
+- `load_mnist`, `load_fashion` — download, cache, and optionally normalize
+  (`normalize=True` returns `[N,1,28,28]` float32 in `[0,1]`).
+- `Dataset`, `TensorDataset`, `DataLoader` (shuffling, batching, device-aware).
+- Augmentations: `random_flip`, `random_crop`, `random_rotate90`, `add_noise`,
+  `random_brightness`, and `Compose` to chain them.
 
-### optim
+### Training
 
-- `SGD(params, lr, momentum=0.0)` - обычный градиентный спуск, можно с моментом;
-- `AdamW(params, lr, betas, eps, weight_decay)` - Adam с отдельным weight decay, см. [Loshchilov & Hutter](https://arxiv.org/abs/1711.05101) (в отличие от обычного [Adam](https://arxiv.org/abs/1412.6980), decay тут не лезет в градиент, а сразу режет веса).
+- Manual loop (torch-style), or keras-style `compile` / `fit` / `evaluate`.
+- `fit` accepts raw arrays or a `DataLoader`, returns per-epoch `history`
+  (`loss`, `acc`, and `val_loss` when validation data is given), shows a
+  progress bar and training accuracy, and supports early stopping via `patience`.
 
-### data
+### Optimization (`tinytensor.optim`)
 
-- `Dataset / TensorDataset` - обертка над (x, y);
-- `DataLoader` - бьет на батчи, можно с shuffle, мини-версия [`torch.utils.data.DataLoader`](https://pytorch.org/docs/stable/data.html).
+- `SGD` (momentum), `AdamW` (decoupled weight decay).
+- `StepLR`, `CosineAnnealingLR` schedulers.
+- `clip_grad_norm_`.
 
-## Примеры
+### Deployment
 
-- [`examples/01_linear_regression.py`](examples/01_linear_regression.py) - линейная регрессия, Linear + MSELoss + SGD на `y = 3x + 2 + шум`.
-- [`examples/02_mnist_mlp.py`](examples/02_mnist_mlp.py) - MLP (Linear -> ReLU -> Linear) с AdamW и DataLoader на синтетике в формате mnist (784 фичи, 10 классов). Настоящего mnist и загрузчиков датасетов тут нет, лень было тащить.
+- `model.quant()` — post-training INT8 quantization of `Linear` layers
+  (per-channel int8 weights, dynamic activation quant, real integer matmul,
+  ~4x smaller checkpoints).
+- `Sequential.prune(amount)` — structured pruning of the weakest neurons.
+- `Sequential.to_onnx(path, input_dim)` — export Linear/ReLU stacks to ONNX,
+  verified against onnxruntime.
+- `Module.save()` / `load()` — pickle-based `state_dict`, `.tt` files.
 
-Как выглядит запуск вживую:
+### Performance
 
-```
-$ python3 01_linear_regression.py
-epoch   0 | loss 30.8016
-epoch 180 | loss 0.2365
-выученные параметры: weight ~ 2.995, bias ~ 1.996
+- im2col/col2im index caching — the index arrays depend only on shape and conv
+  params, not on the data, so they are computed once per shape and reused. Roughly
+  2x faster im2col; results are bit-for-bit identical (verified).
 
-$ python3 02_mnist_mlp.py
-epoch 1/5 | avg loss 2.0998
-epoch 5/5 | avg loss 0.0481
-```
+## Documentation
 
-## Тесты
+- [docs/getting_started.md](docs/getting_started.md) — install, quickstart, first loop
+- [docs/tensor_and_autograd.md](docs/tensor_and_autograd.md) — how `Tensor` and `backward()` work
+- [docs/nn.md](docs/nn.md) — every layer, activation, and loss, PyTorch-style reference
+- [docs/optim.md](docs/optim.md) — optimizers and schedulers
+- [docs/data.md](docs/data.md) — datasets, loaders, augmentations
+- [docs/training.md](docs/training.md) — manual loop and keras-style API
+- [docs/cuda.md](docs/cuda.md) — the CUDA backend and `set_device`
+- [docs/quantization.md](docs/quantization.md) — INT8 quantization
+- [docs/utils.md](docs/utils.md) — progress bars, early stopping, summary
+- [docs/model_saving.md](docs/model_saving.md) — save/load format
+- [docs/faq.md](docs/faq.md) — issues that came up during development
 
-```bash
-pip install -e .[dev]
-python3 -m pytest tests/ -v
-```
-
-47 штук, гоняют арифметику тензоров и broadcasting, autograd (накопление
-градиента, топология, повторный backward), лоссы, оптимизаторы и
-Dataset/DataLoader.
-
-> Важно: запускать через pytest из корня репы (или после `pip install -e .`),
-> а не `python3 test_x.py` из папки tests - иначе tinytensor просто не найдется.
-
-## Структура
+## Project layout
 
 ```
 tinytensor/
 ├── tinytensor/
-│   ├── core/        # Tensor, autograd, ops
-│   ├── nn/          # Module, Linear, активации, MSELoss
-│   ├── optim/        # SGD, AdamW
-│   ├── data/         # Dataset, DataLoader
-│   ├── backends/     # заготовка под cuda, пока пусто
-│   └── config.py     # сид рандома
+│   ├── core/        # Tensor, autograd engine, ops
+│   ├── nn/          # layers, activations, losses, functional (im2col)
+│   ├── models/      # LeNet, VGG, ResNet
+│   ├── optim/       # SGD, AdamW, schedulers
+│   ├── data/        # Dataset, DataLoader, dataset loaders, augmentations
+│   ├── utils/       # progress bar, EarlyStopping, summary
+│   └── config.py    # seed + global device
 ├── examples/
 ├── tests/
-├── setup.py
-└── requirements.txt
+├── docs/
+└── setup.py
 ```
 
-## Чего нет
+## Known limitations
 
-- Только numpy-backend, cuda_gpu.py пустой файл-заглушка.
-- Нет кросс-энтропии, сверток, рекуррентных слоев, сохранения модели (см. ToDo в исходном плане проекта).
-- backward не кэширует граф между вызовами, каждый раз строит топологию заново, как и в micrograd - никакой лени в духе pytorch тут нет.
+These are real and worth knowing before you rely on the library.
 
-## Ссылки
+- **Speed.** The NumPy/CuPy backend goes through im2col for convolutions, which
+  allocates large temporary matrices. Even on GPU this is far slower than
+  cuDNN-based frameworks — ResNet18 on MNIST runs, but at roughly 2 minutes per
+  epoch on an RTX 2080, not seconds. Fine for learning, not for serious training.
+- **Hand-written backward per layer.** `Conv2d`, `BatchNorm2d`, pooling, `RNN`,
+  and attention implement their forward against raw array data and ship their own
+  manually written `backward()`. They are gradient-checked, but adding a new such
+  layer means deriving its gradient by hand rather than getting it for free.
+- **Tensor op coverage is limited.** No `sum(axis=...)`, no `mean`, no `clip`,
+  no `exp`/`max` as autograd ops on `Tensor`. Some losses/layers reach into
+  `.data` and NumPy directly as a result.
+- **`BCELoss` has no `log(0)` guard yet.** The `eps` constructor argument exists
+  but is not wired in; feeding exactly 0 or 1 probabilities can produce infinities.
+- **Autograd graph is rebuilt every backward** via recursive topological sort
+  (micrograd-style). No graph caching, no `retain_graph`, no `no_grad()` context —
+  inference still builds the graph. Very deep graphs can hit Python's recursion limit.
+- **ONNX export and pruning are narrow.** `to_onnx` covers Linear + ReLU stacks;
+  other activations are silently skipped. `prune`/`to_onnx` assume a `Sequential`
+  of `Linear` layers. Quantization is `Linear`-only and CPU-focused.
+- **No CIFAR loader.** The official CIFAR source isn't reachable from the sandbox
+  used during development; only MNIST and Fashion-MNIST loaders ship.
+- **Single-threaded `DataLoader`** — no multiprocessing or prefetching.
 
-- [Andrej Karpathy - micrograd (GitHub)](https://github.com/karpathy/micrograd) - основной референс для всего autograd
-- [Andrej Karpathy - видео про backprop и micrograd](https://www.youtube.com/watch?v=VMj-3S1tku0)
-- [CS231n - Backpropagation, Intuitions](https://cs231n.github.io/optimization-2/)
-- [colah - Calculus on Computational Graphs](https://colah.github.io/posts/2015-08-Backprop/)
-- [NumPy broadcasting rules](https://numpy.org/doc/stable/user/basics.broadcasting.html)
-- [He et al. - инициализация весов](https://arxiv.org/abs/1502.01852)
-- [Kingma & Ba - Adam](https://arxiv.org/abs/1412.6980)
-- [Loshchilov & Hutter - AdamW](https://arxiv.org/abs/1711.05101)
-- [Hendrycks & Gimpel - GELU](https://arxiv.org/abs/1606.08415)
-- [PyTorch - torch.nn.Module](https://pytorch.org/docs/stable/generated/torch.nn.Module.html)
-- [PyTorch - torch.utils.data.DataLoader](https://pytorch.org/docs/stable/data.html)
+## Roadmap
+
+Things that are planned or would be natural next steps:
+
+- CIFAR-10/100 loaders.
+- A minimal GPT (the building blocks — `Embedding`, causal `MultiHeadAttention`,
+  `LayerNorm` — are already here; positional encoding and a char/SentencePiece
+  tokenizer are what's missing).
+- Further GPU optimization beyond im2col caching (fewer temporary allocations).
+- `no_grad()` context and an iterative (non-recursive) topological sort.
+- More Tensor ops (`sum(axis)`, `mean`, `clip`) so fewer layers need hand-written backward.
+
+## References
+
+- [Andrej Karpathy — micrograd](https://github.com/karpathy/micrograd)
+- [CS231n — Backpropagation](https://cs231n.github.io/optimization-2/)
+- [Loshchilov & Hutter — Decoupled Weight Decay Regularization (AdamW)](https://arxiv.org/abs/1711.05101)
+- [He et al. — Deep Residual Learning (ResNet)](https://arxiv.org/abs/1512.03385)
+- [CuPy documentation](https://docs.cupy.dev/en/stable/)

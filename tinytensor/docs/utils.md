@@ -2,25 +2,25 @@
 
 ## progress_bar / train_bar
 
-Генератор-обертка, рисует прогрессбар в консоли поверх любого итерируемого:
+A generator wrapper that prints a progress bar over any iterable:
 
 ```python
-from tinytensor.utils import train_bar   # алиас для progress_bar, кому как привычнее
+from tinytensor.utils import train_bar   # alias for progress_bar
 
-for epoch in train_bar(range(100), prefix="обучение"):
+for epoch in train_bar(range(100), prefix="training"):
     ...
 ```
 
-Печатает что-то типа:
+Prints something like:
 ```
-обучение |██████████████████████████████| 100.0% [12.3s]
+training |██████████████████████████████| 100.0% [12.3s]
 ```
 
-Работает с любым объектом у которого есть `len()`, необязательно с `range` - можно и на `DataLoader` навесить, если хочется видеть прогресс по батчам, а не по эпохам.
+Works with anything that has `len()`, not just `range` — can also be wrapped around a `DataLoader` to show per-batch progress instead of per-epoch.
 
 ## EarlyStopping
 
-Следит за val_loss, останавливает обучение и (по желанию) откатывает модель на лучший чекпоинт, если она перестала улучшаться:
+Tracks a validation metric, stops training when it stalls, and (optionally) restores the model to its best checkpoint:
 
 ```python
 from tinytensor.utils import EarlyStopping
@@ -33,14 +33,38 @@ for epoch in range(100):
     val_loss = evaluate(model)
 
     if early_stopping(val_loss):
-        print(f"обучение прекратилось на эпохе {epoch+1}")
+        print(f"stopped at epoch {epoch+1}")
         break
 ```
 
-Как это работает:
+- `patience` — number of consecutive non-improving epochs allowed before stopping
+- `min_delta` — minimum improvement to count as real progress (smaller improvements don't reset the patience counter)
+- `restore_best_weights` — if `True`, the model is rolled back to the weights from its best epoch on stop (via `state_dict()`/`load_state_dict()` under the hood, kept in memory through `copy.deepcopy`, nothing touches disk)
 
-- `patience` - сколько эпох подряд можно не улучшаться, прежде чем реально остановиться;
-- `min_delta` - минимальное улучшение, которое считается "реальным" (если лосс упал меньше чем на `min_delta` - это не считается прогрессом, счетчик `patience` тикает дальше);
-- `restore_best_weights` - если True, при остановке модель откатится на веса с лучшей эпохи (через `state_dict()`/`load_state_dict()` под капотом, деньги на диск не тратятся, все в памяти через `copy.deepcopy`).
+`EarlyStopping.__call__` accepts either a plain number or a `Tensor` (it unwraps `.data` itself), so the raw output of `loss_fn(...)` can be passed directly.
 
-`EarlyStopping.__call__` принимает как обычное число, так и `Tensor` (сам вытащит `.data`), так что можно скармливать прямо результат `loss_fn(...)` без ручной распаковки.
+## summary()
+
+```python
+from tinytensor.utils import summary
+
+model = Sequential(Linear(784, 128), ReLU(), Linear(128, 10))
+summary(model, input_shape=(1, 784))
+```
+
+Prints layer types, output shapes, and parameter counts:
+```
+==================================================
+layer (type)         output shape       param #
+--------------------------------------------------
+Linear               (1, 128)           100,480
+ReLU                  (1, 128)                0
+Linear                (1, 10)             1,290
+--------------------------------------------------
+Total params: 101,770
+Trainable params: 101,770
+Non-trainable params: 0
+==================================================
+```
+
+Runs a dummy forward pass with zeros of the given `input_shape` to infer output shapes. Only inspects direct `Module` attributes (or lists/tuples of them) on the given model — nested containers beyond one level, or models built without storing layers as attributes, may not be fully captured.

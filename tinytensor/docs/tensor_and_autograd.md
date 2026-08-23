@@ -1,14 +1,14 @@
-# Tensor и autograd
+# Tensor and Autograd
 
-## Что внутри Tensor
+## What's inside a Tensor
 
-У каждого `Tensor` есть:
+Every `Tensor` holds:
 
-- `data` - сами значения (numpy-массив, всегда float32);
-- `grad` - градиент, пока не посчитан - None;
-- `_prev` - от каких тензоров он произошел (родители в графе);
-- `_backward` - функция которая знает как раскидать градиент на родителей;
-- `device` - просто метка `"cpu"` или `"cuda"`, влияет только на то, какой matmul дернется (см. [cuda.md](cuda.md)).
+- `data` — the actual values (a `numpy.ndarray` on CPU, a `cupy.ndarray` on GPU, always `float32`)
+- `grad` — the accumulated gradient, `None` until computed, same array type as `data`
+- `_prev` — the set of parent tensors this one was built from (the computation graph edges)
+- `_backward` — a closure that knows how to route the gradient from this tensor into `_prev`
+- `device` — `"cpu"` or `"cuda"`
 
 ```python
 from tinytensor.core.tensor import Tensor
@@ -16,56 +16,96 @@ from tinytensor.core.tensor import Tensor
 x = Tensor([1.0, 2.0, 3.0], requires_grad=True)
 ```
 
-`requires_grad=False` по умолчанию - если тензор не участвует в обучении (например входные данные или маска в dropout), градиент по нему считать не надо, и autograd честно его пропускает.
+`requires_grad=False` by default — tensors that don't participate in training (input data, masks) don't need gradient bookkeeping and are skipped by the engine.
 
-## Как работает backward
+## CPU/GPU backend resolution
 
-Когда считаете `z = f(x, y)`, по цепному правилу:
+`tinytensor.core.tensor.get_array_module(data)` inspects the *type* of an array and returns either the `numpy` or `cupy` module:
+
+```python
+def get_array_module(data):
+    if hasattr(type(data), "__module__") and "cupy" in type(data).__module__:
+        import cupy as cp
+        return cp
+    return np
+```
+
+Every operation's backward closure calls `get_array_module(self.data)` before allocating a new gradient buffer (`zeros_like`, `ones_like`) or running an elementwise math function (`where`, `exp`, `tanh`, `sqrt`, `clip`, `maximum`, `matmul`). This means a tensor's entire forward/backward computation stays on whichever device its data actually lives on — there's no separate "GPU mode" flag to keep in sync, the correct backend is derived directly from the array in front of you at each step.
+
+`Tensor.to(device)` / `.cuda()` / `.cpu()` move `data` (and `grad`, if already computed) between `numpy` and `cupy` arrays. `Module.to(device)` / `.cuda()` / `.cpu()` do the same recursively across every parameter and submodule, including layers stored in a `Sequential`.
+
+## How backward() works
+
+For `z = f(x, y)`, the chain rule gives:
 
 ```
 dL/dx = dL/dz * dz/dx
 dL/dy = dL/dz * dz/dy
 ```
 
-`backward()` строит топологический порядок графа (`tinytensor/core/autograd.py`), ставит корню градиент = 1 и идет в обратном порядке, вызывая `_backward()` у каждого узла. Ровно так же устроен micrograd Карпатова, только у него даже покомпактнее:
+`backward()` builds a topological order of the graph (`tinytensor/core/autograd.py`), seeds the root's gradient with ones, and walks the order in reverse, calling `_backward()` on each node. This is the same construction used in [micrograd](https://github.com/karpathy/micrograd):
 
-- [Karpathy - micrograd](https://github.com/karpathy/micrograd) - реализация того же самого на ~100 строк, must see
-- [CS231n: Backpropagation, Intuitions](https://cs231n.github.io/optimization-2/) - если нужно разложить backprop по полочкам
-- [colah - Calculus on Computational Graphs](https://colah.github.io/posts/2015-08-Backprop/)
+```python
+def backward(target_tensor):
+    topo = []
+    visited = set()
 
-Видос по теме, если хочется увидеть как это пишется с нуля вживую: [Karpathy - "The spelled-out intro to neural networks and backpropagation"](https://www.youtube.com/watch?v=VMj-3S1tku0).
+    def build_topo(v):
+        if v not in visited:
+            visited.add(v)
+            for child in v._prev:
+                build_topo(child)
+            topo.append(v)
 
-Пример руками:
+    build_topo(target_tensor)
+    target_tensor.grad = np.ones_like(target_tensor.data, dtype=np.float32)
+
+    for v in reversed(topo):
+        v._backward()
+```
+
+Further reading on the general idea:
+- [Karpathy — micrograd](https://github.com/karpathy/micrograd)
+- [Karpathy — "The spelled-out intro to neural networks and backpropagation"](https://www.youtube.com/watch?v=VMj-3S1tku0)
+- [CS231n — Backpropagation, Intuitions](https://cs231n.github.io/optimization-2/)
+- [colah — Calculus on Computational Graphs](https://colah.github.io/posts/2015-08-Backprop/)
+
+Minimal example:
 
 ```python
 a = Tensor([2.0], requires_grad=True)
 b = Tensor([3.0], requires_grad=True)
-c = a * b          # тензор запоминает откуда он взялся
+c = a * b
 d = c.sum()
-d.backward()        # градиент = 1 в d, потом раскидывается назад
+d.backward()
 print(a.grad, b.grad)  # [3.] [2.]
 ```
 
-Важный момент: градиенты **накапливаются**, а не перезаписываются. Поэтому перед каждым новым шагом обучения нужно звать `optimizer.zero_grad()` (или `model.zero_grad()`), иначе градиенты с прошлого шага останутся и посчитаются заново поверх старых.
+Gradients **accumulate** rather than get overwritten. Call `optimizer.zero_grad()` (or `model.zero_grad()`) before every step, or gradients from the previous step will still be sitting on the parameters and get added to.
 
-## Формулы, которые реализованы в Tensor
+## Gradient formulas implemented on Tensor
 
-| операция | вперед | производная |
+| Op | Forward | Gradient |
 |---|---|---|
-| `a + b` | `a + b` | `dL/da += dL/dz`, `dL/db += dL/dz` (плюс схлопывание по broadcast-осям) |
+| `a + b` | `a + b` | `dL/da += dL/dz`, `dL/db += dL/dz` (summed over broadcast axes) |
 | `a * b` | `a * b` | `dL/da += dL/dz * b`, `dL/db += dL/dz * a` |
-| `a @ b` | matmul (cpu или cublas) | `dL/da += dL/dz @ bᵀ`, `dL/db += aᵀ @ dL/dz` |
+| `a @ b` | matmul (`numpy.matmul` or `cupy.matmul`, chosen via `get_array_module`) | `dL/da += dL/dz @ bᵀ`, `dL/db += aᵀ @ dL/dz` (batched: gradient uses `swapaxes(-1, -2)`, not a full transpose, so this works correctly for `(batch, heads, seq, dim)`-shaped tensors like attention scores, not just plain 2D matrices) |
 | `a ** p` | `aᵖ` | `dL/da += dL/dz * p * a^(p-1)` |
-| ReLU | `max(0, x)` | 1 при x>0, иначе 0 |
-| LeakyReLU | x или αx | 1 при x>0, иначе α |
+| `a.reshape(...)` | reshape | `dL/da += dL/dz.reshape(a.shape)` |
+| `a.transpose(*axes)` | permute axes | `dL/da += dL/dz.transpose(inverse_axes)` |
+| `a.sum()` | sum | `dL/da += dL/dz * ones_like(a)` |
+| ReLU | `max(0, x)` | `1` where `x>0`, else `0` |
+| LeakyReLU | `x` or `αx` | `1` where `x>0`, else `α` |
 | sigmoid | `1/(1+e⁻ˣ)` | `σ(x)*(1-σ(x))` |
 | tanh | `tanh(x)` | `1 - tanh²(x)` |
-| GELU | `0.5x(1+tanh(√(2/π)(x+0.044715x³)))` | см. [статью по GELU](https://arxiv.org/abs/1606.08415), формула там не самая короткая |
+| GELU | `0.5x(1+tanh(√(2/π)(x+0.044715x³)))` | see the [GELU paper](https://arxiv.org/abs/1606.08415), the exact formula is not short |
+
+Layer-specific gradients (Conv2d, BatchNorm2d, RNN, Embedding, Softmax, CrossEntropyLoss) are documented in [nn.md](nn.md), since those are hand-written backward closures rather than compositions of the table above.
 
 ## Broadcasting
 
-Про broadcasting и почему градиент иногда надо досуммировать обратно (`_unbroadcast`) норм объясняют [правила broadcasting в numpy](https://numpy.org/doc/stable/user/basics.broadcasting.html). Смысл в двух словах: если складываете `(2,3)` и `(1,3)`, numpy сам растягивает второй тензор до `(2,3)` для прямого прохода, а вот градиент на обратном надо сжать обратно до `(1,3)` - иначе размерности не сойдутся. Этим и занимается `_unbroadcast`.
+Why gradients sometimes need to be summed back down (`_unbroadcast`): adding a `(2,3)` tensor to a `(1,3)` tensor implicitly stretches the second one to `(2,3)` for the forward pass, so the incoming gradient on the backward pass has shape `(2,3)` and needs to be collapsed back to `(1,3)` before it matches the original tensor's shape. `_unbroadcast` only calls array *methods* (`.sum(axis=...)`, `.ndim`), which `cupy` implements identically to `numpy`, so it works correctly on either backend without needing `get_array_module` itself. See [NumPy's broadcasting rules](https://numpy.org/doc/stable/user/basics.broadcasting.html) for the underlying mechanics.
 
-## Известное ограничение
+## Known limitation
 
-`backward()` не кэширует граф между вызовами, каждый раз строит топологию заново, как и в micrograd - никакой лени в духе pytorch (`retain_graph`, `detach` и тд) тут нет.
+`backward()` does not cache the graph between calls — every call rebuilds the topological order from scratch, same as micrograd. There is no `retain_graph`, no lazy graph construction, and in-place mutation of tensors that are part of an active graph is not tracked or protected against.

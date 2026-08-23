@@ -32,7 +32,8 @@ class DataLoader:
 
         #cбор
         batch_x, batch_y = [], []
-        device = 'cpu'
+        from tinytensor.config import config
+        device = config.default_device      # берём глобальное устройство, не хардкод cpu
         for i in batch_indices:
             x, y = self.dataset[i]
             if isinstance(x, Tensor):

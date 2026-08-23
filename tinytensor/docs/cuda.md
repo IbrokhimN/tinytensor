@@ -1,39 +1,50 @@
-# Cuda-бэкенд
+# CUDA Backend
 
-## Как это работает
+## How it works
 
-При установке `setup.py` сам проверяет, есть ли `nvcc`, и если да - ищет `libcudart`/`libcublas` в нескольких стандартных местах (`$CUDA_HOME`, `$CUDA_PATH`, `/usr/local/cuda`, `$CONDA_PREFIX`). Если нашел и то и другое - собирает `tinytensor.cuda_ops`, маленький pybind11-модуль, который дергает `cublasSgemm` (`tinytensor/backends/cuda_gpu.cu` + `cuda_binding.cpp`). Если чего-то не хватает - тихо откатывается на cpu-путь, установка не падает.
+There are two separate pieces, and it's worth keeping them distinct:
 
-Сейчас куда греет только `matmul` - если у любого из двух тензоров `device == "cuda"` и модуль собрался, `Tensor.__matmul__` уходит в `cuda_ops.matmul` вместо numpy. Все остальные операции (сложение, активации и тд) все равно считаются на cpu через numpy, реального управления памятью на gpu тут нет - данные каждый раз гоняются host <-> device внутри одного вызова.
+1. **Build-time**: `setup.py` checks for `nvcc`, then looks for `libcudart`/`libcublas` in a handful of standard locations (`$CUDA_HOME`, `$CUDA_PATH`, `/usr/local/cuda`, `$CONDA_PREFIX`). If both are found, it compiles `tinytensor.cuda_ops`, a small `pybind11` extension (`tinytensor/backends/cuda_gpu.cu` + `cuda_binding.cpp`). If anything is missing, the build silently falls back to a CPU-only build — the install never fails because of an incomplete CUDA toolchain.
+
+2. **Runtime**: `tinytensor/core/tensor.py` tries `import cuda_ops` and `import cupy`. Both need to succeed for `HAS_CUDA = True`. `cupy` is what actually does the work — every GPU tensor's `.data` is a real `cupy.ndarray`, and every operation dispatches through `get_array_module(data)` (returns `cupy` or `numpy` based on the array's own type) rather than going through the compiled `cuda_ops` extension. In practice `cuda_ops` currently just acts as an availability signal alongside `cupy` in the `HAS_CUDA` check; the actual matrix multiplication and every other op run through `cupy`'s own kernels, which already use cuBLAS internally.
 
 ```python
 x = Tensor([[1.0, 2.0]]).to("cuda")
 w = Tensor([[1.0], [1.0]]).to("cuda")
-out = x @ w   # уйдет в cublas, если бэкенд собрался
+out = x @ w   # x.data and w.data are cupy arrays; matmul runs via get_array_module -> cupy.matmul
 ```
 
-## Если сборка падает
+`Module.to("cuda")` / `.cuda()` recursively convert every parameter's `.data` (and `.grad`, if present) to `cupy` arrays, walking into every submodule including layers stored inside `Sequential`.
 
-Самая частая проблема - `nvcc` есть, а `libcudart`/`libcublas` физически не установлены (например nvcc стоит через conda, а сами cuda-либы нет). Раньше это роняло весь `pip install`, сейчас `setup.py` ловит такие ошибки сборки и просто откатывается на cpu-версию с предупреждением в консоли - переустанавливать ничего не надо, само разрешится, просто без ускорения.
+## If the build fails
 
-Если хочется реально собрать gpu-версию и она не собирается - поставьте недостающие cuda-библиотеки. Через conda:
+The most common failure is `nvcc` being present (e.g. installed via conda) while `libcudart`/`libcublas` are not physically installed anywhere the linker checks. This used to hard-fail the entire `pip install`; the current `setup.py` catches build failures for the CUDA extension specifically and falls back to a CPU-only install with a warning printed to the console — no reinstall needed, it just won't have the extension built (which, per above, matters less than it used to since `cupy` does the real compute work).
+
+To actually get GPU acceleration working you need `cupy` installed and importable at runtime — that's the part that matters most:
+
+```bash
+pip install cupy-cuda12x   # match the suffix to your installed CUDA version
+```
+
+If you also want the build-time extension to compile (currently only used as part of the `HAS_CUDA` gate), install the missing CUDA libraries. Via conda:
 
 ```bash
 conda install -c conda-forge cuda-cudart-dev libcublas-dev -y
 ```
 
-После этого пересоберите:
+Then rebuild:
 
 ```bash
 pip uninstall pytinytensor -y
 pip install pytinytensor --no-cache-dir
 ```
 
-## Что почитать
+## Further reading
 
+- [CuPy documentation](https://docs.cupy.dev/en/stable/) — the library actually doing the GPU compute
 - [cuBLAS docs (cublasSgemm)](https://docs.nvidia.com/cuda/cublas/index.html#cublas-lt-t-gt-gemm)
-- [pybind11 docs](https://pybind11.readthedocs.io/en/stable/) - как из C++/CUDA дергать функции из питона
+- [pybind11 docs](https://pybind11.readthedocs.io/en/stable/) — how the build-time extension is exposed to Python
 
-## Публикация wheel с кудой
+## Publishing a wheel with CUDA support
 
-Если собираете локально `.whl` с уже вкомпиленным `.so` - учтите, что PyPI **не примет** голый линуксовый wheel (`linux_x86_64`), нужен `manylinux_*` тег через `auditwheel`, а `cudart`/`cublas` не входят в стандартный manylinux-образ, их придется тащить самому. Проще всего публиковать только sdist (`.tar.gz`) - тогда пакет соберется у каждого пользователя локально под его окружение (плюс/минус то, что уже описано выше).
+A locally built `.whl` with the extension already compiled will **not** be accepted by PyPI as-is — bare Linux wheels (tagged `linux_x86_64`) are rejected; a `manylinux_*` tag via `auditwheel` is required, and `cudart`/`cublas` are not part of the standard manylinux image, so they'd need to be bundled in manually. The simplest path is publishing only the sdist (`.tar.gz`) — every user's `pip install` then compiles it locally against whatever CUDA toolchain (or lack of one) they actually have, and installs `cupy` separately as needed.

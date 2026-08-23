@@ -9,6 +9,30 @@ class MSELoss(Module):
         return sq_diff.sum() * (1.0 / y_pred.data.size)
 
 # -log((e-xtar - M)/(sum(exj-M)))=-(xt-M)+log sum(exj-M)
+
+class BCELoss(Module):
+    def __init__(self, eps=1e-12):
+        super().__init__()
+        self.eps = eps
+    def forward(self, p, y_true):
+        # BCE = -среднее[ y·log(p) + (1-y)·log(1-p) ]
+        xp = get_array_module(p.data)
+        clipped = Tensor(xp.clip(p.data, self.eps, 1.0 - self.eps),
+                         requires_grad=p.requires_grad, device=p.device)
+        if p.requires_grad:
+            clipped._prev = {p}
+            def _clip_back():
+                if p.grad is None:
+                    p.grad = xp.zeros_like(p.data, dtype=xp.float32)
+                mask = (p.data >= self.eps) & (p.data <= 1.0 - self.eps)
+                p.grad += clipped.grad * mask
+            clipped._backward = _clip_back
+
+        term1 = y_true * clipped.log()
+        term2 = (1 - y_true) * (1 - clipped).log()
+        res = term1 + term2
+        return res.sum() * (-1.0 / p.data.size)
+
 class CrossEntropyLoss(Module):
     def __init__(self, eps=1e-12):
         super().__init__()

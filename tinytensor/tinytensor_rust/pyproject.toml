@@ -1,0 +1,15 @@
+# pyproject.toml - говорит python-инструментам, как собирать этот пакет.
+# maturin - инструмент, который компилирует rust и делает из него python-модуль.
+
+[build-system]
+requires = ["maturin>=1.0,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "tinytensor_rust"
+version = "0.1.0"
+description = "Rust-ускорение im2col для tinytensor"
+requires-python = ">=3.8"
+
+[tool.maturin]
+# ничего особенного не нужно - maturin сам найдёт Cargo.toml и src/lib.rs
